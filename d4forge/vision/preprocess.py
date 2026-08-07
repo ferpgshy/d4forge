@@ -84,18 +84,22 @@ PRIMARY_RENDER = RenderSpec(scale=4, margin=16)
 # Medido: "+1,431 Maximum Life" saia como "431 Maximum . Life" no padrao.
 FALLBACK_RENDER = RenderSpec(scale=6, margin=16, smooth=3)
 
-# Escada completa de repescagem, na ordem de tentativa. Cada degrau resolve um
-# caso real que os anteriores erraram (varrido contra recortes de sessoes):
-#   4x duro   - o mais preciso no geral (primario)
-#   5x duro   - "+2 to Invigorating Strike" saia como "-2 to Strike" no 4x
-#   4x suave  - "7.0% Dodge Chance" so' sai legivel aqui ("Dodgei" e' consertado
-#               pelo casamento com o catalogo)
-#   6x suave  - "+1,431 Maximum Life" saia como "431 Maximum . Life" nos duros
+# Escada de repescagem, na ordem de tentativa. Varrida contra recortes de
+# sessoes reais (5 escalas x 3 margens x 4 desfoques): nenhum ajuste unico le'
+# todos os casos dificeis, mas estes tres cobrem os quatro conhecidos.
+#
+#   4x duro    o mais rapido; resolve a maioria das linhas
+#   6x suave   "+2 to Invigorating Strike" (saia "-2 to Strike") e
+#              "+1,431 Maximum Life" (saia "431 Maximum . Life")
+#   4x muito   "7.2% / 7.0% Dodge Chance" (saia ".2% Dodgei Chance", sem o
+#     suave    digito da frente) - so' este degrau recupera o primeiro digito
+#
+# Margem maior que 16 piorou tudo na varredura: o detector volta a partir a
+# linha em varias caixas, e e' na emenda que os caracteres se perdem.
 RENDER_LADDER: tuple[RenderSpec, ...] = (
     PRIMARY_RENDER,
-    RenderSpec(scale=5, margin=16),
-    RenderSpec(scale=4, margin=16, smooth=2),
     FALLBACK_RENDER,
+    RenderSpec(scale=4, margin=16, smooth=4),
 )
 
 

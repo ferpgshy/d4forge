@@ -7,10 +7,28 @@ cache de OCR, catalogo e regras sejam faceis de inspecionar, versionar e apagar.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+def _dirs() -> tuple[Path, Path]:
+    """(pasta gravavel, pasta de recursos).
+
+    Congelado pelo PyInstaller, `__file__` aponta para uma pasta temporaria que
+    e' recriada a cada execucao: gravar catalogo e configuracoes ali significa
+    perde-los ao fechar. O que o usuario edita fica ao lado do executavel; os
+    recursos empacotados vem de sys._MEIPASS.
+    """
+    if getattr(sys, "frozen", False):
+        gravavel = Path(sys.executable).resolve().parent
+        recursos = Path(getattr(sys, "_MEIPASS", gravavel))
+        return gravavel, recursos
+    raiz = Path(__file__).resolve().parent.parent
+    return raiz, raiz
+
+
+PROJECT_DIR, RESOURCE_DIR = _dirs()
 DATA_DIR = PROJECT_DIR / "data"
 CAPTURES_DIR = PROJECT_DIR / "captures"
 
@@ -22,8 +40,14 @@ TIMINGS_PATH = DATA_DIR / "timings.json"
 
 @dataclass
 class Settings:
-    # -- seguranca (padroes conservadores de proposito) -------------------
-    dry_run: bool = True
+    # -- interface --------------------------------------------------------
+    language: str = "pt-BR"
+
+    # -- seguranca --------------------------------------------------------
+    # Simulacao continua existindo no engine (e os testes usam), mas saiu da
+    # interface: servia para conferir calibracao antes de confiar no clique, e
+    # isso ja' foi feito.
+    dry_run: bool = False
     max_attempts: int = 200
     max_gold: int | None = None
     max_minutes: float | None = 60.0
@@ -41,7 +65,7 @@ class Settings:
     # corta o atraso de reagir a cada troca de tela.
     poll_interval: float = 0.02
     state_timeout: float = 8.0
-    input_speed: str = "rápido"  # humano | rápido | instantâneo
+    input_speed: str = "instantâneo"  # humano | rápido | instantâneo
 
     # Tempo entre apertar Iniciar e o engine comecar a agir, para dar chance de
     # voltar o foco para o jogo. Sem isso o guard aborta na hora, porque quem
@@ -71,3 +95,32 @@ class Settings:
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+PREVIOUS_SESSION_DIR = "sessao_anterior"
+
+
+def clear_captures() -> int:
+    """Esvazia captures/ por completo. Devolve quantos arquivos sairam.
+
+    Chamada ao fechar a janela normalmente. Se o app cair, nao passa por aqui -
+    as evidencias sobrevivem justamente quando importam.
+
+    A pasta so' guarda material descartavel de depuracao (recortes do OCR e
+    quadros de erro), entao levar tudo e' o comportamento pedido. Se voce
+    guardar algo ali que queira manter, tire antes de fechar o app.
+    """
+    if not CAPTURES_DIR.is_dir():
+        return 0
+
+    removed = 0
+    for path in sorted(CAPTURES_DIR.rglob("*"), key=lambda p: -len(p.parts)):
+        try:
+            if path.is_file():
+                path.unlink()
+                removed += 1
+            elif path.is_dir():
+                path.rmdir()
+        except OSError:
+            continue
+    return removed

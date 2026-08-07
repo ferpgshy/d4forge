@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import time
+from ctypes import wintypes
 from dataclasses import dataclass, field
 
 from ..geometry import Point

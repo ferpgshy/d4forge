@@ -24,12 +24,44 @@ Palpite nao corrige leitura de OCR - so' unidade confirmada faz isso.
 from __future__ import annotations
 
 import json
+import logging
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from .affixes import AffixCatalog, AffixEntry, Unit, _canon
 
-BUNDLED_PATH = Path(__file__).resolve().parent / "resources" / "d4lf_affixes_enUS.json"
+def _bundled_path() -> Path:
+    """Onde esta' a lista de afixos empacotada.
+
+    No .exe os recursos vao para sys._MEIPASS, nao para o lado do modulo -
+    entao quando congelado o bundle tem prioridade. Fora dele, vale a copia do
+    repositorio.
+    """
+    import sys
+
+    from .config import RESOURCE_DIR
+
+    do_bundle = [
+        RESOURCE_DIR / "d4forge" / "resources" / "d4lf_affixes_enUS.json",
+        RESOURCE_DIR / "resources" / "d4lf_affixes_enUS.json",
+    ]
+    do_repo = [Path(__file__).resolve().parent / "resources" / "d4lf_affixes_enUS.json"]
+
+    candidatos = do_bundle + do_repo if getattr(sys, "frozen", False) else do_repo + do_bundle
+    for caminho in candidatos:
+        if caminho.exists():
+            return caminho
+    return candidatos[0]
+
+
+BUNDLED_PATH = _bundled_path()
+
+log = logging.getLogger(__name__)
+
+# A lista do d4lf tem ~877 nomes. Bem abaixo disso significa que ela nao
+# carregou direito, e nao que o jogo encolheu.
+MIN_OFFICIAL_AFFIXES = 500
 
 # Palavras que, no vocabulario do D4, quase sempre indicam valor percentual.
 _PERCENT_HINTS = re.compile(
@@ -106,6 +138,65 @@ def merge_into(catalog: AffixCatalog, entries: list[AffixEntry]) -> int:
         existing.add(_canon(entry.name))
         added += 1
     return added
+
+
+def find_ocr_garbage(catalog: AffixCatalog) -> list[str]:
+    """Entradas que nao existem na lista oficial e sao quase-copias de outra.
+
+    O aprendizado automatico ja' deixou entrar "Life Kil", "Fire Resistence",
+    "I Fire" e "Resistance" - leituras estropiadas que viraram afixo proprio.
+    O estrago e' silencioso: depois de cadastradas elas casam EXATAMENTE, e a
+    leitura errada passa a se apresentar como confiavel.
+    """
+    official = {_canon(e.name) for e in load_bundled()}
+
+    # Sem uma lista oficial crivel, NAO apagamos nada.
+    #
+    # Esta funcao roda sozinha ao abrir o app e decide o que e' lixo comparando
+    # com a lista empacotada. Se essa lista falhar em carregar - arquivo
+    # ausente, empacotamento incompleto, caminho errado no .exe -, todo afixo
+    # legitimo vira "nao-oficial" e e' apagado em silencio. Aconteceu: um teste
+    # apontou o caminho para uma lista de uma entrada e o catalogo caiu de 881
+    # para 466 afixos. Limpeza que depende de referencia nao pode rodar sem ela.
+    if len(official) < MIN_OFFICIAL_AFFIXES:
+        log.warning(
+            "lista oficial com apenas %d afixos (esperado >= %d); "
+            "limpeza do catalogo cancelada por seguranca",
+            len(official), MIN_OFFICIAL_AFFIXES,
+        )
+        return []
+
+    suspects: list[str] = []
+    for name in list(catalog.entries):
+        if _canon(name) in official:
+            continue
+
+        # Palavra de uma letra so'. Nenhum afixo do D4 tem - "I Fire" e' o
+        # residuo de uma leitura que perdeu o resto da frase.
+        if any(len(w) == 1 and w.isalpha() for w in name.split()):
+            suspects.append(name)
+            continue
+
+        # Limiar proprio, mais frouxo que o do parser de propósito: aqui a
+        # pergunta e' "isto e' quase-copia de um afixo que ja' existe?", e a
+        # resposta certa para "Life Kil" vs "Life on Kill" (0.82) e' sim -
+        # mesmo que o parser, por seguranca, se recuse a casar os dois.
+        key = _canon(name)
+        for other in catalog.entries:
+            if other == name:
+                continue
+            if SequenceMatcher(None, key, _canon(other)).ratio() >= 0.80:
+                suspects.append(name)
+                break
+    return sorted(suspects)
+
+
+def purge_ocr_garbage(catalog: AffixCatalog) -> list[str]:
+    """Remove as entradas acima. Devolve os nomes retirados."""
+    removed = find_ocr_garbage(catalog)
+    for name in removed:
+        catalog.remove(name)
+    return removed
 
 
 def import_full_catalog(catalog: AffixCatalog) -> int:

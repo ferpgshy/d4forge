@@ -70,6 +70,43 @@ def test_nome_irreconhecivel_nao_e_confiavel(catalog):
     assert not parsed.confident
 
 
+@pytest.mark.parametrize(
+    "text, value",
+    [
+        # Separador seguido de 3 dígitos é milhar, mesmo lido como ponto.
+        ("+3,000 Fire Resistance", 3000),
+        ("+3. 000 Fire Resistance", 3000),
+        ("+1,431 Maximum Life", 1431),
+        ("+1.431 Maximum Life", 1431),
+        # Seguido de 1 ou 2 dígitos é decimal de verdade.
+        ("14.5% Barrier Generation", 14.5),
+        ("9.4% Impairment Reduction", 9.4),
+    ],
+)
+def test_milhar_x_decimal(catalog, text, value):
+    """Regressão: "+3,000 Fire Resistance" veio do OCR como "+3. 000 ire
+    Resistance" e virava 3.0 — mil vezes menos — passando por confiável porque
+    o nome casava. Quem decide o papel do separador é a contagem de dígitos."""
+    from d4forge.affixes import AffixEntry
+
+    catalog.add(AffixEntry("Fire Resistance"))
+    catalog.add(AffixEntry("Maximum Life"))
+    catalog.add(AffixEntry("Barrier Generation", Unit.PERCENT))
+    assert parse_affix(text, catalog).value == value
+
+
+def test_nome_muito_corrompido_nao_casa(catalog):
+    """"Life Kil" (era "+271 Life on Kill", com "71" e "on" comidos) bate 0.82
+    em "Life on Kill" — abaixo do limiar, então não pode virar leitura
+    confiável valendo 2."""
+    from d4forge.affixes import AffixEntry
+
+    catalog.add(AffixEntry("Life on Kill"))
+    assert not parse_affix("+2 Life Kil", catalog).confident
+    # a correção legítima continua passando
+    assert parse_affix("+291 Life on Kil", catalog).confident
+
+
 def test_lucky_hit_valor_no_meio_da_frase(catalog):
     """"Lucky Hit: Up to a 5% Chance..." não começa com número — o valor está
     no meio. Só é aceito quando o texto casa com o catálogo."""

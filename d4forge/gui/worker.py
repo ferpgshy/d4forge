@@ -36,6 +36,36 @@ class EngineWorker(QThread):
         self._engine.cancel()
 
 
+class WarmupWorker(QThread):
+    """Carrega o modelo de OCR em segundo plano assim que a janela abre.
+
+    Medido: construir o RapidOCR custa ~330 ms e a primeira inferencia ~140 ms.
+    Sem isto, essa meia dezena de decimos cai em cima da primeira leitura do
+    ciclo - justo quando o usuario esta' olhando para ver se funcionou.
+    """
+
+    ready = Signal(float)
+
+    def __init__(self, app_state, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._app = app_state
+
+    def run(self) -> None:
+        import time
+
+        import numpy as np
+
+        start = time.perf_counter()
+        try:
+            # Uma linha sintetica basta para instanciar tudo e rodar um passe.
+            branco = np.full((26, 300, 3), 255, dtype=np.uint8)
+            branco[8:18, 20:120] = 0
+            self._app.ocr.read(branco)
+        except Exception:  # noqa: BLE001 - aquecimento nunca pode derrubar a GUI
+            pass
+        self.ready.emit((time.perf_counter() - start) * 1000)
+
+
 class BenchWorker(QThread):
     """Roda o teste de tempo de resposta fora da thread da interface."""
 

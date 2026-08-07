@@ -61,6 +61,33 @@ def test_persiste(tmp_path):
     assert again.timings["captura de tela"].samples == [1.5]
 
 
+def test_medicao_de_pipeline_antigo_e_descartada(tmp_path):
+    """Depois de corrigir o detector (1951 ms -> 70 ms por linha), a aba
+    Desempenho continuava mostrando p50 de 1,4 s: as amostras antigas dominavam
+    a janela e davam a impressão de que nada tinha melhorado."""
+    import json
+
+    from d4forge.profiling import PIPELINE_VERSION
+
+    path = tmp_path / "timings.json"
+    path.write_text(
+        json.dumps({
+            "pipeline": PIPELINE_VERSION - 1,
+            "timings": {"ler afixo (OCR)": [1951.0, 1800.0]},
+        }),
+        encoding="utf-8",
+    )
+    assert Profiler.load(path).timings == {}
+
+
+def test_formato_antigo_sem_versao_e_descartado(tmp_path):
+    import json
+
+    path = tmp_path / "timings.json"
+    path.write_text(json.dumps({"ler afixo (OCR)": [1951.0]}), encoding="utf-8")
+    assert Profiler.load(path).timings == {}
+
+
 def test_espera_sugerida_ignora_amostra_insuficiente():
     p = Profiler()
     p.record("reação: a → b", 50)

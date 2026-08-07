@@ -115,11 +115,21 @@ _DIRTY = re.compile(
 
 _NO_CHANGE = re.compile(r"^\s*no\s*change\b", re.IGNORECASE)
 
-# Numero em qualquer posicao da frase ("Lucky Hit: Up to a 5% Chance...").
-_EMBEDDED = re.compile(r"(?P<num>[0-9][0-9.,]*)\s*(?P<pct>%?)")
+# Numero no MEIO da frase ("Lucky Hit: Up to a 5% Chance...").
+#
+# Exige pelo menos uma LETRA antes do numero. Sem isso, uma linha cujo digito
+# da frente o OCR comeu (".0% Dodge Chance", "431 Maximum Life") caia aqui e
+# devolvia o resto como se fosse o valor - 0.0 em vez de 7.0. Como o nome ainda
+# casava com o catalogo, a leitura passava por confiavel: exatamente o erro
+# silencioso que o parser existe para impedir.
+_EMBEDDED = re.compile(r"[A-Za-z].*?(?P<num>[0-9][0-9.,]*)\s*(?P<pct>%?)")
 
 # Similaridade minima para aceitar que o nome lido e' uma entrada do catalogo.
-NAME_MATCH_THRESHOLD = 0.82
+# Medido contra erros reais de OCR: as correcoes legitimas ficam acima de 0.94
+# ("Impaiment Reduction" 0.97, "Dodgei Chance" 0.96, "Life on Kil" 0.95). Ja'
+# "Life Kil" - que era "+271 Life on Kill" com "71" e "on" comidos - bate 0.82
+# em "Life on Kill". Com o limiar antigo isso passava por confiavel valendo 2.
+NAME_MATCH_THRESHOLD = 0.86
 
 
 def _canon(text: str) -> str:
@@ -142,9 +152,26 @@ def looks_like_affix_name(name: str) -> bool:
     return any(len(word) >= 4 for word in name.split())
 
 
+# Separador seguido de exatamente TRES digitos e' milhar; de um ou dois, decimal.
+# O jogo nunca mostra tres casas decimais, entao a contagem decide sozinha.
+_THOUSANDS = re.compile(r"^\d{1,3}(?:[.,]\d{3})+$")
+
+
 def _parse_number(token: str) -> float | None:
-    # Remove separador de milhar e os espacos que o OCR enfia no meio do numero.
-    cleaned = re.sub(r"[\s,]+", "", token).rstrip(".")
+    """Converte o token numerico, decidindo o papel de cada separador.
+
+    O OCR troca virgula por ponto com frequencia: "+3,000 Fire Resistance" veio
+    como "+3. 000 ire Resistance". Tratar o ponto sempre como decimal fazia isso
+    virar 3.0 - e, como o NOME casava com o catalogo, a leitura passava por
+    confiavel valendo mil vezes menos. Quem desfaz a ambiguidade e' a contagem
+    de digitos depois do separador, nao o simbolo lido.
+    """
+    # O OCR tambem parte o numero ao meio ("1 0.0%", "3. 000").
+    compact = re.sub(r"\s+", "", token)
+    if _THOUSANDS.match(compact):
+        return float(re.sub(r"[.,]", "", compact))
+
+    cleaned = compact.replace(",", "").rstrip(".")
     if not cleaned or not any(c.isdigit() for c in cleaned):
         return None
     try:

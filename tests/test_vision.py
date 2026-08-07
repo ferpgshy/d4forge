@@ -146,7 +146,55 @@ def test_le_valor_de_milhar_sem_perder_digito(ocr):
     fixture = Path(__file__).parent / "fixtures" / "linha_1431_maximum_life.png"
     if not fixture.exists():
         pytest.skip("fixture ausente")
-    assert ocr.read(imread(fixture)).text == "+1,431 Maximum Life"
+
+    # O verify espelha o uso real do engine: é o parse contra o catálogo que
+    # julga cada degrau da escada de renderizações.
+    from d4forge.affixes import AffixCatalog, AffixEntry, parse_affix
+
+    catalog = AffixCatalog.seeded()
+    catalog.add(AffixEntry("Maximum Life"))
+    verify = lambda t: parse_affix(t, catalog).confident  # noqa: E731
+
+    result = ocr.read(imread(fixture), verify)
+    assert parse_affix(result.text, catalog).value == 1431
+
+
+@pytest.mark.parametrize(
+    "fixture_name, expected_name, expected_value",
+    [
+        # 4x lia "-2 to Strike" (palavra do MEIO dropada, extremos cobertos);
+        # o degrau 5x resolve.
+        ("linha_invigorating_strike.png", "Invigorating Strike", 2),
+        # só o 4x muito suavizado recupera o dígito da frente; nos outros sai
+        # ".2% Dodgei Chance" (sem o 7) ou "29 70 hance" (valor 2970!).
+        ("linha_dodge_chance.png", "Dodge Chance", 7.0),
+        ("linha_dodge_chance_72.png", "Dodge Chance", 7.2),
+    ],
+)
+def test_escada_de_renderizacoes_resolve_casos_reais(ocr, fixture_name, expected_name, expected_value):
+    """Recortes de sessão real que o render primário misleu deterministicamente.
+
+    A escada tenta variantes até o parse contra o catálogo aceitar — o juiz é
+    o domínio, não heurística de imagem."""
+    from pathlib import Path
+
+    from d4forge.affixes import AffixCatalog, AffixEntry, Unit, parse_affix
+    from d4forge.imageio import imread
+
+    fixture = Path(__file__).parent / "fixtures" / fixture_name
+    if not fixture.exists():
+        pytest.skip("fixture ausente")
+
+    catalog = AffixCatalog.seeded()
+    catalog.add(AffixEntry("Invigorating Strike", Unit.RANK))
+    catalog.add(AffixEntry("Dodge Chance", Unit.PERCENT))
+    verify = lambda t: parse_affix(t, catalog).confident  # noqa: E731
+
+    result = ocr.read(imread(fixture), verify)
+    parsed = parse_affix(result.text, catalog)
+    assert parsed.confident, result.text
+    assert parsed.name == expected_name
+    assert parsed.value == expected_value
 
 
 def test_repescagem_so_dispara_quando_precisa(shots, profiles, ocr):

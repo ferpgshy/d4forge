@@ -175,10 +175,23 @@ class InputProfile:
 
 HUMANO = InputProfile("humano", 45, 18, (0.05, 0.13), (0.04, 0.10), (0.035, 0.075))
 RAPIDO = InputProfile("rápido", 140, 6, (0.012, 0.030), (0.008, 0.020), (0.012, 0.025))
-INSTANTANEO = InputProfile("instantâneo", 0, 1, (0.0, 0.0), (0.0, 0.0), (0.004, 0.010))
+# "Instantaneo" e' o movimento, nao o clique.
+#
+# O jogo amostra input por quadro: chegar e clicar no mesmo instante nao da' a
+# ele um quadro para registrar que o cursor esta' sobre o botao. Com settle
+# zerado, um clique em Replace Affix se perdeu na tentativa 71 de uma sessao e
+# derrubou tudo. 15-25 ms cobre um quadro a 60 FPS - continua ~15x mais barato
+# que o perfil "rapido", cujo custo esta' no percurso, nao na espera.
+INSTANTANEO = InputProfile(
+    "instantâneo", 0, 1, (0.0, 0.0), (0.015, 0.025), (0.008, 0.014)
+)
 
 PROFILES = {p.label: p for p in (HUMANO, RAPIDO, INSTANTANEO)}
-DEFAULT_PROFILE = RAPIDO
+
+# Padrao. Medido: o mouse humanizado custava 360 ms por volta (3 cliques) contra
+# ~20 ms aqui, num ciclo de 1,8 s. Quem quiser o movimento disfarcado troca na
+# aba Desempenho - a escolha continua disponivel, so' deixou de ser o padrao.
+DEFAULT_PROFILE = INSTANTANEO
 
 
 # --- movimento com aparencia humana ---------------------------------------

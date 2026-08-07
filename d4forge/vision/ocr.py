@@ -43,14 +43,35 @@ from .preprocess import (
     render_for_ocr,
 )
 
-# Abaixo disto, as caixas do detector deixaram parte da linha de fora. A
-# cobertura agora e' por uniao de intervalos, e os vaos ENTRE palavras (que as
-# caixas legitimamente nao cobrem) consomem uns 5-10% - por isso o limiar e'
-# mais folgado que os 0.92 da versao por extremos.
-COVERAGE_OK = 0.85
+# Abaixo disto, as caixas do detector deixaram parte da linha de fora.
+#
+# Calibrado com o trace da escada sobre recortes reais: leitura correta mede
+# 0.99-1.00, porque o detector cobre a linha inteira num bloco continuo. Uma
+# leitura que perdeu o "+1," de "+1,431 Maximum Life" mede 0.88 - o digito
+# comido custa so' ~12% da largura, entao o limiar precisa ser exigente para
+# separar os dois casos. Com 0.85 aquela leitura truncada passava valendo 431.
+COVERAGE_OK = 0.95
 
 # Threads do onnxruntime. Poucas de proposito - ver comentario em _ensure().
 DEFAULT_OCR_THREADS = 2
+
+# Suba este numero sempre que a escada de renderizacoes, o limiar de cobertura
+# ou a gramatica do parser mudarem. O cache em disco guarda o veredito de uma
+# versao antiga; sem invalidar, uma leitura errada gravada no passado continua
+# voltando pronta e escapa de toda correcao posterior.
+CACHE_VERSION = 4
+
+# Numero com o digito da frente comido: ".7%", ",425". A linha do jogo nunca
+# comeca assim, entao no cache isso e' sempre residuo de leitura estropiada.
+_TRUNCATED_NUMBER = re.compile(r"^\s*[.,]\s*\d")
+
+
+def plausible_line(text: str) -> bool:
+    """Uma linha de afixo poderia mesmo ter este texto?"""
+    text = (text or "").strip()
+    if not text or _TRUNCATED_NUMBER.match(text):
+        return False
+    return any(ch.isalpha() for ch in text)
 
 _STARTS_WITH_NUMBER = re.compile(r"^\s*(?:[+-]|[x×])?\s*\d")
 _NO_CHANGE = re.compile(r"^\s*no\s*change", re.IGNORECASE)
@@ -114,6 +135,16 @@ def order_boxes(items: list[tuple[float, float, float, float, str, float]]):
     return ordered
 
 
+# Largura de tinta por caractere acima da qual faltam letras no resultado.
+#
+# Medido sobre 56 recortes de uma sessao real: leitura inteira fica entre 8,12 e
+# 10,47 px/char; as truncadas destoam - "+2 Life Kil" (era "+271 Life on Kill")
+# deu 14,33, "+284 Life Kil" deu 11,73. E' o unico sinal que pega omissao do
+# RECONHECEDOR: quando ele engole letras mas o detector cobriu a linha toda, a
+# cobertura continua 1,00 e nao denuncia nada.
+MAX_INK_PER_CHAR = 11.0
+
+
 @dataclass(frozen=True, slots=True)
 class Reading:
     """Uma leitura do backend, com o que precisamos para julga-la."""
@@ -121,6 +152,15 @@ class Reading:
     text: str
     score: float
     coverage: float  # fracao da tinta que as caixas do detector cobriram
+    ink_width: int = 0  # largura da mascara, para aferir a densidade
+
+    @property
+    def density_ok(self) -> bool:
+        """O texto lido e' comprido o bastante para a tinta que existe?"""
+        chars = len(self.text.replace(" ", ""))
+        if not chars or not self.ink_width:
+            return True
+        return self.ink_width / chars <= MAX_INK_PER_CHAR
 
     @property
     def structural_ok(self) -> bool:
@@ -143,7 +183,8 @@ class Reading:
         Confianca sozinha nao serve de arbitro: medido, o modelo leu 'Dexterity'
         (perdendo o '+151') com score 0.90, acima do 0.74 da leitura correta.
         """
-        return (self.structural_ok, self.complete, self.coverage, self.score)
+        return (self.structural_ok, self.density_ok, self.complete,
+                self.coverage, self.score)
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +239,38 @@ class OcrStats:
         )
 
 
+# Maior lado que o detector processa. Ver _tune_detector().
+DET_LIMIT_SIDE = 1280
+
+
+def _tune_detector(engine) -> bool:
+    """Impede o detector de inflar a imagem.
+
+    O RapidOCR vem com `limit_type: min` e `limit_side_len: 736`, ou seja: ele
+    redimensiona ate' o MENOR lado alcancar 736. Nossas linhas sao largas e
+    baixas - 660x104 -, entao isso multiplicava tudo por 7 e mandava uma imagem
+    de 4670x736 (3,4 megapixels) para ler uma unica linha de texto.
+
+    Era a causa da instabilidade: leitura nova custava 1,4-5,5 s, enquanto o
+    cache respondia em 1 ms. Trocando para `max`, o maior lado passa a mandar e
+    a imagem segue no tamanho original.
+
+    Medido nos recortes reais: 1951 ms -> 70 ms por linha (28x), e a precisao
+    subiu de 4/5 para 5/5 - a imagem inflada tambem atrapalhava o modelo.
+    """
+    try:
+        for op in getattr(engine.text_detector, "preprocess_op", []):
+            if hasattr(op, "limit_type") and hasattr(op, "limit_side_len"):
+                op.limit_type = "max"
+                op.limit_side_len = DET_LIMIT_SIDE
+                return True
+    except Exception as exc:  # noqa: BLE001 - versao nova pode mudar a estrutura
+        log.warning("nao consegui ajustar o detector (%s); segue no padrao", exc)
+    else:
+        log.warning("detector sem limit_type conhecido; segue no padrao")
+    return False
+
+
 class RapidOcrBackend:
     """Backend neural. Carregado sob demanda: inicializar leva ~1-2 s."""
 
@@ -219,9 +292,15 @@ class RapidOcrBackend:
                 self._engine = RapidOCR(intra_op_num_threads=self.threads)
             except TypeError:
                 self._engine = RapidOCR()
+            _tune_detector(self._engine)
         return self._engine
 
-    def read(self, image: np.ndarray, span: tuple[int, int] | None = None) -> Reading:
+    def read(
+        self,
+        image: np.ndarray,
+        span: tuple[int, int] | None = None,
+        ink_width: int = 0,
+    ) -> Reading:
         """Le uma imagem que ja' e' UMA linha (texto escuro em fundo claro).
 
         `span` diz onde a tinta deveria estar na imagem. Comparar isso com o que
@@ -234,7 +313,7 @@ class RapidOcrBackend:
         """
         result, _ = self._ensure()(image)
         if not result:
-            return Reading("", 0.0, 0.0)
+            return Reading("", 0.0, 0.0, ink_width)
 
         # (esq, dir, topo, base, texto, score)
         found: list[tuple[float, float, float, float, str, float]] = []
@@ -247,7 +326,7 @@ class RapidOcrBackend:
             elif len(item) == 2:     # (texto, score)
                 found.append((float(len(found)), 0.0, 0.0, 0.0, str(item[0]), float(item[1])))
         if not found:
-            return Reading("", 0.0, 0.0)
+            return Reading("", 0.0, 0.0, ink_width)
 
         # Ordem de leitura: linha de cima primeiro, depois X. O detector devolve
         # as caixas em ordem arbitraria - juntar na ordem de chegada ja' fez
@@ -279,7 +358,7 @@ class RapidOcrBackend:
                 covered += right - max(cursor, left)
                 cursor = max(cursor, right)
             coverage = max(0.0, min(1.0, covered / width))
-        return Reading(text, score, coverage)
+        return Reading(text, score, coverage, ink_width)
 
 
 class OcrEngine:
@@ -297,25 +376,55 @@ class OcrEngine:
 
         self._cache_path = self.data_dir / "ocr_cache.json"
         self.cache: dict[str, str] = self._load_cache()
+        # Leituras que NAO foram aprovadas. Ficam so' em memoria e nunca vao
+        # para o disco - mas evitam repetir a escada inteira (3 chamadas ao
+        # modelo, ~1,4 s cada sob disputa de CPU) num recorte que ja' sabemos
+        # que o modelo le' assim. Como a inferencia e' deterministica, repetir
+        # daria exatamente o mesmo resultado.
+        self._rejected: dict[str, str] = {}
         self.backend = backend if backend is not None else RapidOcrBackend()
         self._dirty = False
 
     # -- persistencia -----------------------------------------------------
     def _load_cache(self) -> dict[str, str]:
+        """Carrega o cache, descartando o que a versao atual nao aceitaria.
+
+        O cache guarda o que uma versao ANTIGA do pipeline julgou confiavel. Ao
+        endurecer o parser, entradas ja' gravadas continuam valendo e voltam
+        instantaneamente como se estivessem certas: foi assim que
+        ".7% Dodge Chance" (o "7" da frente comido) sobreviveu a correcao e
+        seguiu sendo devolvido em 0,7 ms, sem passar pelo modelo de novo.
+        """
         if not self._cache_path.exists():
             return {}
         try:
-            return json.loads(self._cache_path.read_text(encoding="utf-8"))
+            blob = json.loads(self._cache_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             log.warning("cache de OCR ilegivel (%s); comecando vazio", exc)
             return {}
+
+        if not isinstance(blob, dict):
+            return {}
+        if blob.get("version") != CACHE_VERSION:
+            log.info("cache de OCR e' de outra versao do pipeline; descartado")
+            self._dirty = True
+            return {}
+
+        entries = blob.get("entries", {})
+        clean = {k: v for k, v in entries.items() if plausible_line(v)}
+        if len(clean) != len(entries):
+            log.info("%d entrada(s) implausivel(is) descartada(s) do cache",
+                     len(entries) - len(clean))
+            self._dirty = True
+        return clean
 
     def save(self) -> None:
         if not self._dirty:
             return
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        blob = {"version": CACHE_VERSION, "entries": self.cache}
         self._cache_path.write_text(
-            json.dumps(self.cache, indent=0, ensure_ascii=False), encoding="utf-8"
+            json.dumps(blob, indent=0, ensure_ascii=False), encoding="utf-8"
         )
         self._dirty = False
 
@@ -343,6 +452,10 @@ class OcrEngine:
         if cached is not None:
             self.stats.cache_hits += 1
             return done(cached, "cache")
+        rejected = self._rejected.get(line_key)
+        if rejected is not None:
+            self.stats.cache_hits += 1
+            return done(rejected, "cache")
 
         # 2. backend, subindo a escada de renderizacoes ate' uma leitura que o
         # dominio aceite. Quem julga cada degrau e' o `verify` do chamador
@@ -354,28 +467,53 @@ class OcrEngine:
 
         best: Reading | None = None
         best_text = ""
+        best_key: tuple = ()
         accepted = False
         attempts = 0
         for spec in RENDER_LADDER:
-            reading = self.backend.read(render_for_ocr(mask, spec), spec.span(width))
+            reading = self.backend.read(
+                render_for_ocr(mask, spec), spec.span(width), width
+            )
             attempts += 1
             text = normalize_text(reading.text)
-            if verify is not None and text and verify(text):
+            recognized = bool(text) and (verify is None or verify(text))
+
+            # A aprovacao exige as DUAS coisas: o dominio reconhecer a linha e
+            # ela estar geometricamente completa. So' `verify` nao basta -
+            # ".0% Dodgei Chance" casa com "Dodge Chance" no catalogo e passa
+            # como confiavel valendo 0.0. E' a cobertura que denuncia o digito
+            # perdido e manda subir mais um degrau.
+            sound = (
+                reading.structural_ok
+                and reading.complete
+                and reading.density_ok
+                and plausible_line(text)
+            )
+            if sound and recognized:
                 best, best_text, accepted = reading, text, True
                 break
-            if best is None or reading.rank > best.rank:
-                best, best_text = reading, text
-            if verify is None and reading.structural_ok and reading.complete:
-                break
+
+            # Nenhum degrau aprovado ainda: guarda o menos ruim. Concordar com o
+            # catalogo pesa mais que "comeca com digito" - sem isso o lixo
+            # "29 70 hance" (valor 2970!) vencia ".2% Dodgei Chance", que errava
+            # so' o primeiro digito. Ambos acabam marcados como duvidosos, mas o
+            # que sobra no log e no cache tem de ser o mais proximo da verdade.
+            key = (recognized, *reading.rank)
+            if best is None or key > best_key:
+                best, best_text, best_key = reading, text, key
 
         self.stats.backend_calls += 1
         self.stats.retries += attempts - 1
         backend_ms = (time.perf_counter() - backend_start) * 1000
 
-        # 3. so' memoriza leitura aceita; duvida se resolve de novo na proxima
-        if best_text and self.learn and (accepted or (verify is None)):
-            self.cache[line_key] = best_text
-            self._dirty = True
+        # 3. leitura aprovada vai para o cache em disco; a reprovada fica só na
+        # memoria da sessao, para nao repetir a escada no mesmo recorte
+        if best_text and self.learn:
+            if accepted or verify is None:
+                self.cache[line_key] = best_text
+                self._dirty = True
+            else:
+                self._rejected[line_key] = best_text
 
         return done(best_text, "backend", best.score if best else 0.0,
                     backend_ms, attempts > 1)

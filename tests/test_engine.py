@@ -132,6 +132,22 @@ def test_aborta_se_o_orbe_nao_confirma(scripted):
     assert "confirmar a opção" in outcome.reason
 
 
+def test_confirmacao_do_orbe_tolera_a_animacao(scripted, monkeypatch):
+    """O orbe acende com animação: julgar num quadro só reprovava uma troca
+    correta. Regressão real — "+400 Resistance to All Elements" bateu a regra,
+    o clique funcionou, e a verificação disse que a tela mostrava No Change."""
+    rules = RuleSet([TargetRule("Resource Generation", Comparison.GE, 10)])
+    engine, _ = scripted(["enchant_locked", "replace", "result"], rules)
+
+    # Os dois primeiros quadros ainda mostram a seleção antiga; o terceiro já
+    # tem o orbe pedido aceso.
+    leituras = iter([2, None, 0, 0, 0, 0])
+    monkeypatch.setattr(
+        "d4forge.engine.selected_orb", lambda *a: next(leituras, 0)
+    )
+    assert engine._confirm_selection(0)
+
+
 def test_item_que_ja_cumpre_a_meta_nao_gasta_material(scripted):
     """O item da tela travada tem "+3,000 Shadow Resistance". Se o alvo já está
     satisfeito, encantar de novo só queimaria ouro — e, com azar, a meta."""
@@ -144,6 +160,69 @@ def test_item_que_ja_cumpre_a_meta_nao_gasta_material(scripted):
     assert outcome.count == 0          # nenhuma tentativa
     assert screen.step == 0            # nenhum clique
     assert "já tem" in outcome.reason
+
+
+def test_clique_perdido_e_repetido_em_vez_de_derrubar_a_sessao(scripted, monkeypatch):
+    """Regressão real: na tentativa 71 o clique em Replace Affix se perdeu e a
+    sessão inteira acabou. Repetir é seguro — só repetimos enquanto a tela NÃO
+    mudou, então um clique que funcionou nunca é reenviado."""
+    rules = RuleSet([TargetRule("Coisa Inexistente", Comparison.ANY)])
+    engine, screen = scripted(["enchant_locked", "replace", "result"], rules, max_attempts=2)
+
+    # O primeiro clique de cada par é engolido; o segundo avança o roteiro.
+    real = screen.advance
+    engolir = {"n": 0}
+
+    def flaky(rect, profile=None):
+        engolir["n"] += 1
+        if engolir["n"] == 1:
+            return Point(0, 0)  # perdido: o roteiro não avança
+        return real(rect, profile)
+
+    monkeypatch.setattr("d4forge.engine.click_rect", flaky)
+    engine.state_timeout = 0.3
+
+    outcome = engine.run()
+    assert outcome.count == 2, outcome.reason
+
+
+def test_so_estaciona_o_cursor_quando_ele_atrapalha():
+    """O cursor do jogo entra no quadro capturado, então precisa sair de cima do
+    que lemos — mas só de lá. Ir ao ponto de estacionamento depois de todo
+    clique era ida e volta à toa, e é o que fazia o movimento parecer que
+    parava e voltava a cada rodada."""
+    from d4forge.profile import DEFAULT_PROFILE
+
+    prof = DEFAULT_PROFILE.scaled(Rect(0, 0, 1920, 1080))
+    lidas = [
+        prof.locked_affix, prof.replace_current, prof.occultist_title,
+        prof.replace_title, prof.result_title, prof.enchant_cost,
+        *prof.replace_options, *prof.replace_orbs,
+        *prof.affix_rows, *prof.affix_orbs,
+    ]
+    atrapalha = lambda r: any(x.contains(r.center) for x in lidas)  # noqa: E731
+
+    assert not atrapalha(prof.enchant_button)
+    assert not atrapalha(prof.replace_button)
+    assert atrapalha(prof.result_close)        # cai sobre a opção 2
+    assert atrapalha(prof.replace_orbs[0])
+
+
+def test_salva_um_recorte_por_opcao_lida(scripted, monkeypatch, tmp_path):
+    """Cada leitura de opção deixa seu recorte, não só as duvidosas: é assim
+    que dá para conferir depois se o OCR bateu com a tela."""
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    monkeypatch.setattr("d4forge.config.CAPTURES_DIR", captures)
+
+    rules = RuleSet([TargetRule("Coisa Inexistente", Comparison.ANY)])
+    engine, _ = scripted(["enchant_locked", "replace", "result"], rules, max_attempts=3)
+    engine.run()
+
+    crops = sorted(p.name for p in captures.glob("ocr_*_opcao*.png"))
+    assert len(crops) == 6, crops           # 3 tentativas x 2 opções
+    assert crops == sorted(crops)           # o prefixo numérico mantém a ordem
+    assert any("_ok" in c or "_duvidoso" in c for c in crops)
 
 
 def test_limpa_recortes_de_ocr_da_sessao_anterior(scripted, monkeypatch, tmp_path):
@@ -160,8 +239,14 @@ def test_limpa_recortes_de_ocr_da_sessao_anterior(scripted, monkeypatch, tmp_pat
     engine, _ = scripted(["enchant_locked", "replace", "result"], rules, max_attempts=1)
     engine.run()
 
-    remaining = sorted(p.name for p in captures.iterdir())
-    assert remaining == ["debug_sem_selecao_120002.png"]
+    remaining = {p.name for p in captures.rglob("*") if p.is_file()}
+    # nada da sessão anterior sobrevive…
+    assert "ocr_opcao1_120000.png" not in remaining
+    assert "ocr_opcao2_120001.png" not in remaining
+    assert "debug_sem_selecao_120002.png" not in remaining
+    # …e o que está lá é só desta sessão.
+    assert remaining
+    assert all(n.startswith("ocr_001_") for n in remaining)
 
 
 def test_tela_desconhecida_para_com_mensagem_clara(scripted, shots):

@@ -19,6 +19,10 @@ from pathlib import Path
 # do estado atual da maquina em vez da media de todos os tempos ja' vistos.
 MAX_SAMPLES = 200
 
+# Suba junto com CACHE_VERSION quando o pipeline mudar de custo. Comparar
+# medicao de antes e depois de uma otimizacao na mesma janela so' confunde.
+PIPELINE_VERSION = 4
+
 
 @dataclass
 class Timing:
@@ -98,11 +102,21 @@ class Profiler:
     # -- persistencia -----------------------------------------------------
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        blob = {name: t.samples for name, t in self.timings.items()}
+        blob = {
+            "pipeline": PIPELINE_VERSION,
+            "timings": {name: t.samples for name, t in self.timings.items()},
+        }
         path.write_text(json.dumps(blob, indent=0), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "Profiler":
+        """Carrega as medicoes, descartando as de um pipeline anterior.
+
+        Medicao velha nao e' so' inutil: engana. Depois de corrigir o detector
+        (1951 ms -> 70 ms por linha), a aba Desempenho continuava mostrando
+        p50 de 1,4 s porque as amostras antigas dominavam a janela - dava a
+        impressao de que a correcao nao tinha surtido efeito.
+        """
         prof = cls()
         if not path.exists():
             return prof
@@ -110,7 +124,9 @@ class Profiler:
             blob = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return prof
-        for name, samples in blob.items():
+        if not isinstance(blob, dict) or blob.get("pipeline") != PIPELINE_VERSION:
+            return prof
+        for name, samples in blob.get("timings", {}).items():
             timing = Timing(name)
             timing.samples = [float(s) for s in samples][-MAX_SAMPLES:]
             prof.timings[name] = timing

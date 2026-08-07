@@ -247,12 +247,32 @@ class EnchantEngine:
         enquanto a tela NAO mudou: se o primeiro clique tivesse funcionado, ja'
         teriamos saido daqui.
         """
+        # Quanto esperar antes de reclicar. NAO e' `state_timeout`: aquele e' o
+        # prazo para desistir da sessao inteira, e gasta-lo entre cada tentativa
+        # era o que fazia o ciclo parecer travado. Com o jogo respondendo em
+        # ~80 ms (p95 155 ms, maximo 173 ms em 111 rodadas reais), esperar 8 s
+        # por um clique que nao chegou nao muda o desfecho - so' custa 8 s.
+        janela = self.profiler.suggested_retry_after()
         for i in range(attempts):
+            ultima = i + 1 == attempts
             sufixo = "" if i == 0 else f" (tentativa {i + 1})"
             self._click(rect, f"{label}{sufixo}")
-            if self._wait_until_leaves(state, f"clicar em {label}", fatal=False):
+            # Na ultima tentativa vale o prazo cheio: se a maquina ou o jogo
+            # estiverem realmente lentos hoje, a sessao merece a chance longa
+            # antes de morrer.
+            partiu = time.monotonic()
+            if self._wait_until_leaves(
+                state, f"clicar em {label}", fatal=False,
+                timeout=None if ultima else janela,
+            ):
                 return
-            if i + 1 < attempts:
+            # Sem isto, um clique perdido nao deixava rastro nenhum: o profiler
+            # so' registra a reacao quando a tela MUDA, e por isso o tempo
+            # gasto esperando em vao ficava invisivel no relatorio.
+            self.profiler.record(
+                f"clique perdido: {label}", (time.monotonic() - partiu) * 1000
+            )
+            if not ultima:
                 self._emit(
                     EventKind.INFO,
                     "eng.click_retry", label=label,
@@ -262,16 +282,22 @@ class EnchantEngine:
             "stop.click_lost", label=label, attempts=attempts, state=state.value
         )
 
-    def _wait_until_leaves(self, previous: ScreenState, what: str, fatal: bool = True):
+    def _wait_until_leaves(
+        self, previous: ScreenState, what: str,
+        fatal: bool = True, timeout: float | None = None,
+    ):
         """Espera a tela SAIR do estado atual, seja para qual for.
 
         O fluxo do Occultist nao e' uma sequencia fixa: o dialogo de confirmacao
         as vezes nao aparece e o jogo vai direto de Enchant para Replace Affix.
         Por isso esperamos "mudou de tela" em vez de exigir uma tela especifica -
         quem decide o que fazer com a tela nova e' o despachante do run().
+
+        `timeout` menor que `state_timeout` serve para quem vai tentar de novo:
+        nao ha' razao para gastar o prazo de desistencia entre duas tentativas.
         """
         started = time.monotonic()
-        deadline = started + self.state_timeout
+        deadline = started + (self.state_timeout if timeout is None else timeout)
         while time.monotonic() < deadline:
             if self._cancel.is_set():
                 raise safety.StopReason("stop.cancelled")

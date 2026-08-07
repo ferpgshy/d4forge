@@ -108,6 +108,12 @@ class ProgressPanel(QGroupBox):
         self.tabela.setAlternatingRowColors(True)
         self.tabela.setShowGrid(False)
         cab = self.tabela.horizontalHeader()
+        # Por padrao o ResizeToContents remede TODAS as linhas a cada insercao,
+        # e o custo por tentativa cresce com a sessao (medido: 2,5 ms na linha
+        # 50, 7,4 ms na 400). As duas colunas dimensionadas assim tem conteudo
+        # de largura limitada - "#" e o veredito -, entao olhar as primeiras
+        # linhas basta e o custo para de crescer.
+        cab.setResizeContentsPrecision(20)
         cab.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         cab.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         cab.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)

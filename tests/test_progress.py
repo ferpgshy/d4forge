@@ -130,6 +130,15 @@ def test_detalhes_tambem_trocam_de_idioma(painel):
     assert "active" in painel.detalhes.toPlainText()
 
 
+def test_custo_de_inserir_nao_cresce_com_a_sessao(painel):
+    """Uma sessão vai a 200+ tentativas. Com o ResizeToContents padrão, o Qt
+    remede todas as linhas a cada inserção e o custo por tentativa sobe junto —
+    medido, 2,5 ms na linha 50 contra 7,4 ms na 400. Limitar quantas linhas ele
+    consulta deixa o custo constante."""
+    precisao = painel.tabela.horizontalHeader().resizeContentsPrecision()
+    assert 0 < precisao <= 50, precisao
+
+
 def test_reset_limpa_a_sessao_anterior(painel):
     painel.push(_evento(_tentativa(1, Action.NO_CHANGE)))
     painel.reset()

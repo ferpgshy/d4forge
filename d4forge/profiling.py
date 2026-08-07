@@ -133,6 +133,27 @@ class Profiler:
         return prof
 
     # -- ajuste automatico ------------------------------------------------
+    def _reaction_samples(self) -> list[float]:
+        reactions = [t for name, t in self.timings.items() if name.startswith("reação")]
+        return [s for t in reactions for s in t.samples]
+
+    def suggested_retry_after(self, default: float = 1.2) -> float:
+        """Quanto esperar pela tela antes de concluir que o clique se perdeu.
+
+        Nao e' o mesmo que desistir da sessao. E' so' o ponto a partir do qual
+        vale mais clicar de novo do que continuar esperando - e depois desse
+        ponto, esperar nao resolve nada, porque o clique nao chegou.
+
+        O numero sai da propria maquina do usuario: quatro vezes a reacao mais
+        lenta ja' medida, com um piso de 0,8 s. Numa sessao real de 111 rodadas
+        a reacao maxima foi 173 ms, entao a janela fica em 0,8 s - contra os 8 s
+        de `state_timeout` que se gastavam parado antes de tentar de novo.
+        """
+        samples = self._reaction_samples()
+        if len(samples) < 5:
+            return default
+        return max(0.8, min(default * 3, max(samples) / 1000 * 4))
+
     def suggested_settle(self, default: float = 0.25) -> float:
         """Espera segura depois de um clique, em segundos.
 

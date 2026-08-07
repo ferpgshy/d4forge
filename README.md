@@ -268,9 +268,6 @@ A pasta é esvaziada ao iniciar uma sessão e ao fechar a janela normalmente.
 
 ## Aviso
 
-Automatizar input em Diablo IV vai contra os termos de serviço da Blizzard e pode
-resultar em suspensão da conta. Você assume esse risco.
-
 Este projeto não tem vínculo com a Blizzard Entertainment, não é endossado por
 ela e não distribui nenhum material do jogo.
 

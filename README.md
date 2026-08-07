@@ -225,3 +225,25 @@ A pasta é esvaziada ao iniciar uma sessão e ao fechar a janela normalmente.
 
 Automatizar input em Diablo IV vai contra os termos de serviço da Blizzard e pode
 resultar em suspensão da conta. Você assume esse risco.
+
+Este projeto não tem vínculo com a Blizzard Entertainment, não é endossado por
+ela e não distribui nenhum material do jogo.
+
+## Licença
+
+[GPL-3.0](LICENSE). Quem distribuir uma versão modificada precisa abrir o código
+também.
+
+A lista de afixos vem do [d4lf](https://github.com/d4lfteam/d4lf) (MIT) e os
+modelos de OCR do [RapidOCR](https://github.com/RapidAI/RapidOCR) (Apache-2.0).
+Créditos completos em [NOTICE.md](NOTICE.md).
+
+## Contribuindo
+
+As telas de referência dos testes estão em `tests/fixtures/telas/` — são versões
+higienizadas de capturas reais, com só as regiões que o app lê. Para regerá-las a
+partir das suas próprias capturas, use `tools/sanitize_shots.py`.
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests -q
+```

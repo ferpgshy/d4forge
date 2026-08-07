@@ -6,25 +6,31 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-SHOTS = ROOT / "PRINTS SEM CORTE (DIMENSAO)"
+# Telas de referencia, uma por estado do fluxo do Occultist.
+#
+# Sao versoes higienizadas das capturas originais: so' as regioes que o app le'
+# (painel do Occultist e dialogo central) foram preservadas, o resto e' preto.
+# As originais mostravam nome de conta, personagem, ouro e o nome de outros
+# jogadores no mundo - nada disso e' usado, e o repositorio e' publico.
+# Regeradas por tools/sanitize_shots.py.
+SHOTS = ROOT / "tests" / "fixtures" / "telas"
 
-# Cada print de referencia e' um estado do fluxo do Occultist.
 REFERENCE_SHOTS = {
-    "enchant_select": "image 5.png",
-    "confirm": "image 6.png",
-    "replace": "image 7.png",
-    "result": "image 8.png",
-    "enchant_locked": "image 9.png",
+    "enchant_select": "enchant_select.jpg",
+    "confirm": "confirm.jpg",
+    "replace": "replace.jpg",
+    "result": "result.jpg",
+    "enchant_locked": "enchant_locked.jpg",
 }
 
 
 @pytest.fixture(scope="session")
 def shots():
-    """Carrega os prints de referencia; pula os testes se nao existirem."""
+    """Carrega as telas de referencia; pula os testes se nao existirem."""
     from d4forge.imageio import imread
 
     if not SHOTS.is_dir():
-        pytest.skip(f"prints de referencia nao encontrados em {SHOTS}")
+        pytest.skip(f"telas de referencia nao encontradas em {SHOTS}")
     loaded = {}
     for state, name in REFERENCE_SHOTS.items():
         img = imread(SHOTS / name)

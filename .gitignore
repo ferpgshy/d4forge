@@ -16,3 +16,7 @@ dist/
 
 # a captura do README e' versionada
 !docs/
+
+# capturas originais do jogo: mostram conta, personagem e ouro.
+# As telas de teste higienizadas vivem em tests/fixtures/telas/
+PRINTS*/

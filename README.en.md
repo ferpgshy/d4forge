@@ -231,3 +231,25 @@ evidence matters.
 
 Automating input in Diablo IV goes against Blizzard's terms of service and may
 get your account suspended. You take that risk.
+
+This project is not affiliated with or endorsed by Blizzard Entertainment, and
+distributes no game assets.
+
+## License
+
+[GPL-3.0](LICENSE). Anyone distributing a modified version has to open their
+source too.
+
+The affix list comes from [d4lf](https://github.com/d4lfteam/d4lf) (MIT) and the
+OCR models from [RapidOCR](https://github.com/RapidAI/RapidOCR) (Apache-2.0).
+Full credits in [NOTICE.md](NOTICE.md).
+
+## Contributing
+
+The reference screens for the tests live in `tests/fixtures/telas/` — sanitized
+versions of real captures, keeping only the regions the app reads. To regenerate
+them from your own captures, use `tools/sanitize_shots.py`.
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests -q
+```

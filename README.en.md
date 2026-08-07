@@ -275,9 +275,6 @@ evidence matters.
 
 ## Warning
 
-Automating input in Diablo IV goes against Blizzard's terms of service and may
-get your account suspended. You take that risk.
-
 This project is not affiliated with or endorsed by Blizzard Entertainment, and
 distributes no game assets.
 

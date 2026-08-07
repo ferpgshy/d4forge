@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# gerado em runtime: cache de OCR, catalogo, regras e preferencias
+data/
+captures/
+!tests/fixtures/
+

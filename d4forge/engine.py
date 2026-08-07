@@ -1,0 +1,640 @@
+"""Maquina de estados do encantamento.
+
+Cobre o ciclo de como-funciona-enchant.md:
+
+    Enchant -> [Accept] -> [le as 2 opcoes] -> Replace Affix -> Close -> repete
+
+O `Accept` esta' entre colchetes porque **o dialogo de confirmacao nem sempre
+aparece**: observado no jogo, o clique em Enchant as vezes leva direto para a
+tela Replace Affix. Por isso isto aqui nao e' uma sequencia fixa e sim um
+despachante - a cada volta ele olha em que tela o jogo ESTA' e escolhe a acao
+correspondente. Uma sequencia rigida travava na primeira volta esperando um
+dialogo que nunca vinha.
+
+Regras de conducao:
+
+* O engine nunca clica sem antes confirmar em que tela esta'. Depois de agir,
+  espera a tela mudar; se ela nao mudar, ele para - o clique errou o alvo.
+* Depois de marcar uma opcao, ele RECONFERE que o orbe certo acendeu antes de
+  apertar Replace Affix. Sem essa checagem, um clique perdido trocaria o afixo
+  pela opcao errada - e isso nao tem desfazer.
+* Leitura duvidosa vira No Change. Perder uma tentativa custa ouro; trocar o
+  afixo bom por engano custa o item.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import threading
+import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable
+
+import numpy as np
+
+from .affixes import AffixCatalog, ParsedAffix, parse_affix
+from .automation import safety
+from .automation.sendinput import DEFAULT_PROFILE as DEFAULT_INPUT
+from .automation.sendinput import InputProfile, click_rect, jittered_point, move_to
+from .capture import ScreenCapture
+from .profile import EnchantProfile, ResolvedProfile
+from .profiling import Profiler
+from .rules import Action, Decision, RuleSet
+from .vision.ocr import OcrEngine
+from .vision.states import ScreenState, detect_state, selected_orb
+from .window import find_game_window
+
+log = logging.getLogger(__name__)
+
+
+def _same_reading(raw: str, shown: str) -> bool:
+    """Duas grafias da mesma leitura? Ignora '+', virgula de milhar e caixa."""
+    strip = lambda s: re.sub(r"[^a-z0-9.%]", "", s.lower())  # noqa: E731
+    return strip(raw) == strip(shown)
+
+
+class EventKind(Enum):
+    INFO = "info"
+    STATE = "state"
+    READ = "read"
+    DECISION = "decision"
+    CLICK = "click"
+    ATTEMPT = "attempt"
+    SUCCESS = "success"
+    STOPPED = "stopped"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class EngineEvent:
+    kind: EventKind
+    message: str
+    data: dict = field(default_factory=dict)
+
+
+Listener = Callable[[EngineEvent], None]
+
+
+@dataclass
+class Attempt:
+    index: int
+    options: list[ParsedAffix]
+    decision: Decision
+    cost: int = 0
+
+    def describe(self) -> str:
+        opts = " | ".join(o.describe() for o in self.options) or "(nada lido)"
+        return f"#{self.index}: {opts}  ->  {self.decision.reason}"
+
+
+@dataclass
+class Outcome:
+    found: bool
+    reason: str
+    attempts: list[Attempt] = field(default_factory=list)
+    gold_spent: int = 0
+    elapsed_s: float = 0.0
+
+    @property
+    def count(self) -> int:
+        return len(self.attempts)
+
+
+class EnchantEngine:
+    """Roda o ciclo de encantamento ate' achar o afixo ou bater uma trava."""
+
+    def __init__(
+        self,
+        ruleset: RuleSet,
+        catalog: AffixCatalog,
+        ocr: OcrEngine,
+        guard: safety.Guard,
+        profile: EnchantProfile,
+        capture: ScreenCapture | None = None,
+        dry_run: bool = True,
+        listener: Listener | None = None,
+        poll_interval: float = 0.06,
+        state_timeout: float = 8.0,
+        start_delay: float = 4.0,
+        focus_game_on_start: bool = True,
+        profiler: Profiler | None = None,
+        input_profile: InputProfile = DEFAULT_INPUT,
+    ) -> None:
+        self.ruleset = ruleset
+        self.catalog = catalog
+        self.ocr = ocr
+        self.guard = guard
+        self.profile = profile
+        self.capture = capture or ScreenCapture()
+        self.dry_run = dry_run
+        self.poll_interval = poll_interval
+        self.state_timeout = state_timeout
+        self.start_delay = start_delay
+        self.focus_game_on_start = focus_game_on_start
+        self.profiler = profiler if profiler is not None else Profiler()
+        self.input_profile = input_profile
+
+        self._listener = listener
+        self._cancel = threading.Event()
+        self._resolved: ResolvedProfile | None = None
+        self._dumped_tags: set[str] = set()
+
+    # -- infraestrutura ---------------------------------------------------
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    def _emit(self, kind: EventKind, message: str, **data) -> None:
+        log.debug("%s: %s", kind.value, message)
+        if self._listener is not None:
+            self._listener(EngineEvent(kind, message, data))
+
+    def _refresh_profile(self) -> ResolvedProfile:
+        win = find_game_window()
+        if win is None:
+            raise safety.StopReason("janela do Diablo IV não encontrada")
+        if self._resolved is None or self._resolved.client != win.client:
+            self._resolved = self.profile.scaled(win.client)
+            self._emit(EventKind.INFO, f"janela {win.client.w}x{win.client.h} em "
+                                       f"({win.client.x},{win.client.y})")
+        return self._resolved
+
+    def _frame(self) -> tuple[np.ndarray, ResolvedProfile]:
+        prof = self._refresh_profile()
+        with self.profiler.measure("captura de tela"):
+            frame = self.capture.grab(prof.client)
+        if frame is None:
+            raise safety.StopReason("captura de tela falhou")
+        return frame, prof
+
+    def _sleep(self, seconds: float) -> None:
+        if self._cancel.wait(seconds):
+            raise safety.StopReason("cancelado pelo usuário")
+
+    def _verify_parse(self, text: str) -> bool:
+        return parse_affix(text, self.catalog).confident
+
+    # -- observacao da tela -----------------------------------------------
+    def _observe(self):
+        """Le' a tela agora: devolve (frame, perfil, estado)."""
+        frame, prof = self._frame()
+        with self.profiler.measure("detectar estado"):
+            state = detect_state(frame, prof).state
+        return frame, prof, state
+
+    def _wait_stable(self, rois, timeout: float = 0.8, interval: float = 0.015):
+        """Espera as regioes pararem de mudar - fim da animacao.
+
+        Substitui os `sleep` de tempo fixo que eu tinha chutado. Aqui o custo e'
+        o que a animacao realmente leva na maquina do usuario: costuma resolver
+        em ~30 ms, contra os 200 ms que eu dormia antes.
+        """
+        deadline = time.monotonic() + timeout
+        previous = None
+        frame, prof = self._frame()
+        with self.profiler.measure("esperar tela estabilizar"):
+            while time.monotonic() < deadline:
+                frame, prof = self._frame()
+                current = [np.ascontiguousarray(r.crop(frame)) for r in rois]
+                if previous is not None and all(
+                    np.array_equal(a, b) for a, b in zip(previous, current)
+                ):
+                    break
+                previous = current
+                self._sleep(interval)
+        return frame, prof
+
+    def _wait_until_leaves(self, previous: ScreenState, what: str):
+        """Espera a tela SAIR do estado atual, seja para qual for.
+
+        O fluxo do Occultist nao e' uma sequencia fixa: o dialogo de confirmacao
+        as vezes nao aparece e o jogo vai direto de Enchant para Replace Affix.
+        Por isso esperamos "mudou de tela" em vez de exigir uma tela especifica -
+        quem decide o que fazer com a tela nova e' o despachante do run().
+        """
+        started = time.monotonic()
+        deadline = started + self.state_timeout
+        while time.monotonic() < deadline:
+            if self._cancel.is_set():
+                raise safety.StopReason("cancelado pelo usuário")
+            self.guard.check()
+            frame, prof, state = self._observe()
+            if state is not previous and state is not ScreenState.UNKNOWN:
+                # Quanto o JOGO levou para responder ao clique. E' desta medida
+                # que saem as esperas ajustadas.
+                self.profiler.record(
+                    f"reação: {previous.value} → {state.value}",
+                    (time.monotonic() - started) * 1000,
+                )
+                self._emit(EventKind.STATE, f"tela: {state.value}")
+                return frame, prof, state
+            self._sleep(self.poll_interval)
+
+        if self.dry_run:
+            # Em simulacao nada foi clicado, entao a tela nao tinha por que mudar.
+            # Continuar observando deixa voce avancar as telas na mao e ver o que
+            # o bot faria em cada uma.
+            self._emit(
+                EventKind.INFO,
+                "[simulado] a tela não muda sozinha — avance no jogo para continuar",
+            )
+            return None
+
+        raise safety.StopReason(
+            f"depois de {what}, a tela continuou em '{previous.value}' por "
+            f"{self.state_timeout:g}s. O clique pode ter errado o alvo."
+        )
+
+    def _dump_frame(self, tag: str) -> None:
+        """Salva o quadro atual quando algo inesperado acontece.
+
+        Diagnosticar por deducao a partir do log nao funciona: precisamos ver os
+        pixels que o app viu no momento em que decidiu parar.
+        """
+        try:
+            from .config import CAPTURES_DIR
+            from .imageio import imwrite
+
+            frame, _prof = self._frame()
+            stamp = time.strftime("%H%M%S")
+            path = CAPTURES_DIR / f"debug_{tag}_{stamp}.png"
+            if imwrite(path, frame):
+                self._emit(EventKind.INFO, f"quadro salvo em captures/{path.name}")
+        except Exception as exc:  # noqa: BLE001 - diagnostico nunca pode derrubar o bot
+            log.debug("falha ao salvar quadro de diagnostico: %s", exc)
+
+    def _confirm_no_selection(self, samples: int = 5) -> bool:
+        """Confirma, em varios quadros, que realmente nao ha' afixo marcado.
+
+        Um unico quadro nao serve: logo depois de fechar o dialogo o painel
+        reaparece com fade, e durante a transicao a leitura pode acusar a lista
+        de selecao sem orbe aceso. Parar o ciclo por causa de um quadro assim
+        interrompia a sessao sem motivo.
+        """
+        for _ in range(samples):
+            self._sleep(0.25)
+            frame, prof, state = self._observe()
+            if state is not ScreenState.ENCHANT_SELECT:
+                return False
+            if selected_orb(frame, prof.affix_orbs) is not None:
+                return False
+        return True
+
+    # -- acoes ------------------------------------------------------------
+    def _click(self, rect, label: str, park: bool = True) -> None:
+        if self.dry_run:
+            self._emit(EventKind.CLICK, f"[simulado] clicaria em {label} {rect.as_tuple()}")
+            return
+        with self.profiler.measure(f"clique: {label}"):
+            where = click_rect(rect, self.input_profile)
+        self.guard.note_click(where)
+        self._emit(EventKind.CLICK, f"clique em {label} ({where.x},{where.y})")
+        if park:
+            self._park_cursor()
+
+    def _park_cursor(self) -> None:
+        """Tira o cursor de cima da interface depois de clicar.
+
+        O cursor do jogo faz parte do quadro renderizado, entao onde ele para
+        vira ruido para a deteccao de estado e para o OCR.
+        """
+        try:
+            prof = self._refresh_profile()
+            spot = jittered_point(prof.cursor_park)
+            move_to(spot.x, spot.y)
+            # O guard compara a posicao do cursor com a do ultimo clique para
+            # detectar mao humana no mouse; sem atualizar, ele acusaria a si
+            # mesmo de ter movido o mouse.
+            self.guard.note_click(spot)
+        except Exception as exc:  # noqa: BLE001 - nunca derrubar o ciclo por isto
+            log.debug("não consegui estacionar o cursor: %s", exc)
+
+    def _read_cost(self, frame, prof) -> int:
+        """Le' o preco do Enchant - so' quando ele muda alguma decisao.
+
+        O preco sobe a cada encantamento, entao esta leitura nunca acerta o
+        cache: e' uma terceira chamada ao modelo por volta, do mesmo custo das
+        outras duas. Como ela so' alimenta o limite de ouro, pular quando nao ha'
+        limite corta um terco do trabalho de OCR do ciclo.
+        """
+        if self.guard.limits.max_gold is None:
+            return 0
+        with self.profiler.measure("ler custo (OCR)"):
+            result = self.ocr.read(prof.enchant_cost.crop(frame))
+        digits = "".join(c for c in result.text if c.isdigit())
+        return int(digits) if digits else 0
+
+    def _read_current(self, frame, prof, locked: bool = False) -> ParsedAffix | None:
+        """Le' o afixo que o item tem AGORA (base da escalada).
+
+        Devolve None quando a leitura nao e' confiavel - e sem saber o que o
+        item tem, a escalada fica desligada naquela rodada: trocar as cegas e'
+        como se rebaixa um roll bom sem perceber.
+        """
+        roi = prof.locked_affix if locked else prof.replace_current
+        with self.profiler.measure("ler afixo (OCR)"):
+            res = self.ocr.read(roi.crop(frame), self._verify_parse)
+        parsed = parse_affix(res.text, self.catalog)
+        if not parsed.confident:
+            return None
+        self._emit(EventKind.READ, f"atual: {parsed.describe()}", raw=res.text)
+        return parsed
+
+    def _read_options(self, frame, prof) -> list[ParsedAffix]:
+        options: list[ParsedAffix] = []
+        for i, roi in enumerate(prof.replace_options, 1):
+            with self.profiler.measure("ler afixo (OCR)"):
+                res = self.ocr.read(roi.crop(frame), self._verify_parse)
+            # Separar o tempo dentro do modelo do resto revela se a lentidao e'
+            # do OCR ou de disputa de CPU com o jogo.
+            self.profiler.record("  ├ modelo", res.backend_ms)
+            self.profiler.record("  └ preparo/cache", res.overhead_ms)
+            if res.retried:
+                self.profiler.record("  ! repescagem de OCR", res.backend_ms)
+            parsed = parse_affix(res.text, self.catalog)
+            options.append(parsed)
+            # Mostra o texto cru so' quando ele diverge de verdade da
+            # interpretacao. Comparar as strings direto enchia o log de ruido,
+            # porque a exibicao acrescenta "+" e tira a virgula de milhar.
+            shown = parsed.describe()
+            extra = "" if _same_reading(res.text, shown) else f"   [ocr: {res.text!r}]"
+            flag = "" if parsed.confident else "  (duvidoso)"
+            self._emit(
+                EventKind.READ,
+                f"opção {i}: {shown}{flag}{extra}",
+                raw=res.text, source=res.source, ms=res.elapsed_ms,
+                name=parsed.name, known=parsed.entry is not None,
+            )
+            if not parsed.confident:
+                self._dump_crop(roi.crop(frame), f"opcao{i}")
+        if any(not p.confident for p in options):
+            # O quadro inteiro, uma vez por sessao: se um afixo de duas linhas
+            # deslocar o layout da tela, so' o recorte nao mostra isso.
+            self._dump_frame_once("opcao_duvidosa")
+        return options
+
+    def _dump_frame_once(self, tag: str) -> None:
+        if tag in self._dumped_tags:
+            return
+        self._dumped_tags.add(tag)
+        self._dump_frame(tag)
+
+    def _clear_session_crops(self) -> None:
+        """Apaga os recortes de OCR da sessao anterior.
+
+        Os `ocr_*.png` existem so' para inspecionar a sessao corrente; sem esta
+        limpeza acumulariam para sempre. Os `debug_*.png` (erros e paradas
+        inesperadas) ficam - sao evidencia, nao descartavel.
+        """
+        removed = 0
+        try:
+            from .config import CAPTURES_DIR
+
+            for stale in CAPTURES_DIR.glob("ocr_*.png"):
+                stale.unlink(missing_ok=True)
+                removed += 1
+        except Exception as exc:  # noqa: BLE001 - limpeza nunca derruba o ciclo
+            log.debug("falha ao limpar recortes antigos: %s", exc)
+        if removed:
+            self._emit(EventKind.INFO, f"{removed} recorte(s) de OCR da sessão anterior apagado(s)")
+
+    def _dump_crop(self, crop, tag: str) -> None:
+        """Guarda o recorte que gerou uma leitura duvidosa.
+
+        Ver a imagem exata que foi para o OCR e' a unica forma de distinguir
+        recorte mal posicionado de erro do modelo.
+        """
+        try:
+            from .config import CAPTURES_DIR
+            from .imageio import imwrite
+
+            imwrite(CAPTURES_DIR / f"ocr_{tag}_{time.strftime('%H%M%S')}.png", crop)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("falha ao salvar recorte: %s", exc)
+
+    def _apply_decision(self, decision: Decision, prof) -> bool:
+        """Marca a opcao escolhida e confere que ela realmente acendeu."""
+        if decision.action is Action.NO_CHANGE:
+            # No Change ja' vem marcado por padrao; nao mexemos em nada.
+            self._emit(EventKind.DECISION, f"mantendo: {decision.reason}")
+            return True
+
+        index = decision.action.orb_index
+        self._click(prof.replace_orbs[index], f"opção {index + 1}")
+
+        if self.dry_run:
+            return True
+
+        # Reconferencia: o orbe certo tem que estar aceso antes de confirmar.
+        frame, prof = self._wait_stable(list(prof.replace_orbs), timeout=0.6)
+        marked = selected_orb(frame, prof.replace_orbs)
+        if marked != index:
+            self._emit(
+                EventKind.ERROR,
+                f"marquei a opção {index + 1} mas a tela mostra "
+                f"{'nenhuma' if marked is None else f'opção {marked + 1}'}; abortando",
+            )
+            return False
+        self._emit(EventKind.DECISION, f"opção {index + 1} confirmada na tela")
+        return True
+
+    def _countdown(self) -> None:
+        """Espera antes de comecar, para dar tempo de voltar o foco ao jogo.
+
+        Sem isso o guard aborta imediatamente: quem esta' em primeiro plano
+        quando voce aperta Iniciar e' a janela do proprio app, nao o Diablo IV.
+        """
+        win = find_game_window()
+        if win is None:
+            raise safety.StopReason("janela do Diablo IV não encontrada")
+
+        if self.focus_game_on_start and not win.is_foreground:
+            try:
+                win.focus()
+                self._emit(EventKind.INFO, "trazendo o Diablo IV para frente")
+            except Exception:  # noqa: BLE001 - o Windows pode recusar o foco
+                self._emit(EventKind.INFO, "não consegui focar o jogo; troque com Alt+Tab")
+
+        remaining = self.start_delay
+        while remaining > 0:
+            self._emit(EventKind.INFO, f"começando em {remaining:.0f}s… deixe o jogo em foco")
+            step = min(1.0, remaining)
+            self._sleep(step)
+            remaining -= step
+
+        # O cursor pode ter ficado em qualquer lugar da interface; a primeira
+        # leitura da tela precisa dele fora do caminho.
+        if not self.dry_run:
+            self._park_cursor()
+
+        # Se ainda assim o jogo não está em foco, avisa com clareza em vez de
+        # deixar o guard abortar com uma mensagem genérica.
+        win = find_game_window()
+        if self.guard.require_foreground and (win is None or not win.is_foreground):
+            raise safety.StopReason(
+                "o Diablo IV não está em primeiro plano. Use Alt+Tab para voltar "
+                "ao jogo e aperte F9, ou aumente o tempo de espera nas Travas."
+            )
+
+    # -- ciclo principal --------------------------------------------------
+    def run(self) -> Outcome:
+        started = time.monotonic()
+        attempts: list[Attempt] = []
+        self._cancel.clear()
+
+        if self.dry_run:
+            self._emit(EventKind.INFO, "MODO SIMULAÇÃO: lê a tela mas não clica")
+        self._emit(EventKind.INFO, f"limites: {self.guard.limits.describe()}")
+        self._emit(EventKind.INFO, f"regras: {len(self.ruleset.active)} ativa(s)")
+
+        # Despachante: age pelo que ESTA' na tela, nao por uma ordem fixa.
+        # O jogo pula o dialogo de confirmacao dependendo do item/estado, entao
+        # exigir a sequencia completa quebrava o ciclo na primeira volta.
+        last_cost = 0
+        found: Decision | None = None
+        idle_since = time.monotonic()
+        last_acted: ScreenState | None = None
+
+        self._clear_session_crops()
+        self._dumped_tags.clear()
+
+        try:
+            if not self.dry_run and safety.set_high_priority(True):
+                self._emit(EventKind.INFO, "prioridade do processo elevada")
+            self._countdown()
+            self.guard.started_at = time.monotonic()
+
+            while True:
+                self.guard.check()
+                frame, prof, state = self._observe()
+
+                if state is ScreenState.UNKNOWN:
+                    if time.monotonic() - idle_since > self.state_timeout:
+                        self._dump_frame("tela_desconhecida")
+                        raise safety.StopReason(
+                            "não reconheço a tela atual. Abra o Occultist na aba "
+                            "de encantamento e tente de novo."
+                        )
+                    self._sleep(self.poll_interval)
+                    continue
+                idle_since = time.monotonic()
+
+                # Em simulacao a tela nunca avanca sozinha; sem isto o log
+                # encheria repetindo a mesma acao para sempre.
+                if self.dry_run and state is last_acted:
+                    self._sleep(0.3)
+                    continue
+                last_acted = state
+
+                # --- tela de encantamento: dispara a tentativa
+                if state.is_enchant:
+                    if found is not None:
+                        self._emit(
+                            EventKind.SUCCESS,
+                            f"afixo encontrado em {len(attempts)} tentativa(s): {found.reason}",
+                        )
+                        return Outcome(
+                            True, found.reason, attempts,
+                            self.guard.gold_spent, time.monotonic() - started,
+                        )
+                    if state is ScreenState.ENCHANT_LOCKED:
+                        # Se o afixo que o item JA' tem cumpre a meta, encantar
+                        # de novo so' queimaria ouro e material - e, com azar,
+                        # a propria meta.
+                        held = self._read_current(frame, prof, locked=True)
+                        rule = self.ruleset.first_match(held) if held else None
+                        if rule is not None:
+                            reason = (
+                                f"o item já tem {held.describe()}, que atende "
+                                f"'{rule.describe()}'"
+                            )
+                            self._emit(EventKind.SUCCESS, reason)
+                            return Outcome(
+                                True, reason, attempts,
+                                self.guard.gold_spent, time.monotonic() - started,
+                            )
+                    if state is ScreenState.ENCHANT_SELECT and selected_orb(
+                        frame, prof.affix_orbs
+                    ) is None:
+                        if not self._confirm_no_selection():
+                            continue  # era um quadro de transicao, ignora
+                        if not attempts:
+                            self._dump_frame("sem_selecao")
+                            raise safety.StopReason(
+                                "nenhum afixo está marcado. Escolha na tela do jogo "
+                                "qual afixo trocar antes de iniciar."
+                            )
+                        # Ja' encantamos antes, entao havia afixo selecionado e o
+                        # jogo mantem a escolha durante todo o processo. Nao
+                        # reconhecer o orbe aqui e' mais provavel de ser falha de
+                        # leitura do que a selecao ter sumido - seguimos, e se o
+                        # clique nao surtir efeito a trava de "tela nao mudou"
+                        # interrompe com seguranca.
+                        self._dump_frame("orbe_nao_lido")
+                        self._emit(
+                            EventKind.INFO,
+                            "não identifiquei o orbe do afixo marcado; seguindo "
+                            "assim mesmo (já houve tentativa bem-sucedida antes)",
+                        )
+                    last_cost = self._read_cost(frame, prof)
+                    self._click(prof.enchant_button, "Enchant")
+                    self._wait_until_leaves(state, "clicar em Enchant")
+                    continue
+
+                # --- confirmacao: pode simplesmente nao aparecer
+                if state is ScreenState.CONFIRM:
+                    _frame, prof = self._wait_stable([prof.confirm_accept])
+                    self._click(prof.confirm_accept, "Accept")
+                    self._wait_until_leaves(state, "clicar em Accept")
+                    continue
+
+                # --- Replace Affix: ler, decidir, confirmar
+                if state is ScreenState.REPLACE:
+                    # As opcoes entram com animacao; ler antes dela terminar
+                    # produz texto pela metade.
+                    frame, prof = self._wait_stable(list(prof.replace_options))
+                    current = self._read_current(frame, prof)
+                    options = self._read_options(frame, prof)
+                    decision = self.ruleset.decide(options, current)
+                    self._emit(EventKind.DECISION, decision.reason)
+
+                    if not self._apply_decision(decision, prof):
+                        raise safety.StopReason("não consegui confirmar a opção marcada")
+
+                    self._click(prof.replace_button, "Replace Affix")
+
+                    attempt = Attempt(len(attempts) + 1, options, decision, last_cost)
+                    attempts.append(attempt)
+                    self.guard.note_attempt(last_cost)
+                    self._emit(EventKind.ATTEMPT, attempt.describe(), index=attempt.index)
+
+                    # Um degrau de escalada e' aceito mas nao encerra a sessao:
+                    # so' a meta da regra termina.
+                    if decision.goal_reached:
+                        found = decision
+                    self._wait_until_leaves(state, "clicar em Replace Affix")
+                    continue
+
+                # --- resultado: fechar e voltar ao inicio
+                if state is ScreenState.RESULT:
+                    _frame, prof = self._wait_stable([prof.result_close])
+                    self._click(prof.result_close, "Close")
+                    self._wait_until_leaves(state, "clicar em Close")
+                    continue
+
+        except safety.StopReason as stop:
+            self._emit(EventKind.STOPPED, str(stop))
+            return Outcome(
+                False, str(stop), attempts, self.guard.gold_spent, time.monotonic() - started
+            )
+        except Exception as exc:  # noqa: BLE001 - a GUI precisa ver qualquer falha
+            log.exception("engine quebrou")
+            self._emit(EventKind.ERROR, f"erro inesperado: {exc}")
+            return Outcome(
+                False, f"erro: {exc}", attempts, self.guard.gold_spent,
+                time.monotonic() - started,
+            )
+        finally:
+            safety.set_high_priority(False)
+            self.ocr.save()

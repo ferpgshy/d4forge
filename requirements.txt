@@ -1,0 +1,10 @@
+# Python 3.13 (o 3.14 ainda nao tem wheel de onnxruntime nem de PySide6)
+numpy>=2.0
+opencv-python-headless>=4.10
+PySide6>=6.7
+onnxruntime>=1.18
+rapidocr-onnxruntime>=1.2
+dxcam>=0.3
+mss>=9.0
+psutil>=5.9
+pywin32>=306

@@ -38,6 +38,47 @@ Para gerar o executável e o atalho:
 
 </details>
 
+### O antivírus vai reclamar
+
+Ele reclama, e é falso positivo. No
+[VirusTotal](https://www.virustotal.com/gui/file/dff736ae7f4e783990bf781401047c2764a1dc64fe967ffe9c5cf470fa45328f),
+4 de 71 motores acusam o executável — e **os quatro são heurística ou machine
+learning**, nenhum é assinatura:
+
+| motor | detecção | leitura |
+|---|---|---|
+| Microsoft | `Trojan:Win32/Wacatac.B!ml` | o sufixo **`!ml`** é "machine learning"; é o balde genérico da Microsoft |
+| SentinelOne | `Static AI - Suspicious PE` | diz "AI estático" no próprio nome |
+| Arctic Wolf | `Unsafe` | genérico, sem família nomeada |
+| SecureAge | `Malicious` | genérico, sem família nomeada |
+
+Os outros 67 motores — Kaspersky, BitDefender, ESET, Avast, Sophos e companhia —
+não acusam nada. Malware de verdade não passa batido por todos eles.
+
+**Por que dispara.** Três coisas somadas:
+
+1. O binário **não é assinado**. Certificado de assinatura custa por ano, e este
+   projeto é gratuito.
+2. O PyInstaller anexa o Python inteiro como *overlay* no fim do arquivo — o
+   mesmo formato que um packer usa. É a tag `overlay` que o VirusTotal mostra.
+3. O app faz, honestamente, **as mesmas coisas que um trojan faz**: injeta input
+   sintético, captura a tela, enumera janelas de outro processo e eleva a própria
+   prioridade. Descrever um bot de automação e descrever um RAT dá quase a mesma
+   lista.
+
+O terceiro item não tem solução: é o programa funcionando. Um assistente de
+encantamento que não clicasse nem lesse a tela não serviria para nada.
+
+**O que você pode fazer**, em ordem de confiança:
+
+- **Rodar a partir do código-fonte** (logo abaixo). Aí não há binário nenhum para
+  o antivírus julgar, e você lê exatamente o que vai executar.
+- **Conferir o hash** do que baixou contra o publicado na release.
+- **Ler o código.** Ele é todo público e a licença é GPL-3.0.
+
+Se você quiser ajudar a resolver na fonte, [docs/falso-positivo.md](docs/falso-positivo.md)
+tem os formulários dos quatro fornecedores e o texto pronto para enviar.
+
 ## Uso
 
 1. **Alvo** — escolha o afixo, a condição e o valor. A busca é por trecho:
@@ -45,9 +86,11 @@ Para gerar o executável e o atalho:
 2. Abra o Occultist no jogo e **selecione o afixo que quer trocar**.
 3. Aperte **F9**.
 
-**F9** inicia e para; **F12** só para. Ambos funcionam com o jogo em foco. Há
-uma espera configurável (4 s) entre apertar Iniciar e o bot agir, para dar tempo
-de voltar ao jogo.
+**F9** inicia e para; **F12** só para. Ambos funcionam com o jogo em foco.
+
+Ao iniciar, o app **traz o Diablo IV para frente sozinho** e confirma que
+conseguiu — aí o ciclo começa em 0,4 s. A espera configurável só é cumprida
+quando o Windows recusa o foco, que é justamente quando você precisa do Alt+Tab.
 
 O ciclo também para se o jogo sair do foco, se você mexer no mouse, ou ao bater
 os limites de tentativas e tempo.
@@ -215,8 +258,10 @@ A pasta é esvaziada ao iniciar uma sessão e ao fechar a janela normalmente.
 
 ## Limitações
 
-- Calibrado em **1920×1080**. O perfil escala por proporção, mas a UI do D4 não
-  escala exatamente igual em outra resolução.
+- Medido em **1920×1080**. As regiões escalam por altura e são verificadas em
+  1920×1080, 2560×1440 e 3840×2160. Em **ultrawide** (21:9) a posição horizontal
+  do painel vem de modelo, não de medição — ninguém testou ainda, e o app avisa
+  no registro quando detecta uma tela fora de 16:9.
 - Cliente em **inglês**.
 - Exige o jogo em primeiro plano — a captura lê o monitor, não a janela.
 - As referências vieram de um **PTR**; uma build de produção pode diferir.

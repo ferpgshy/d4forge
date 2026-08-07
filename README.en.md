@@ -37,6 +37,48 @@ To build the executable and the shortcut:
 
 </details>
 
+### Your antivirus will complain
+
+It will, and it is a false positive. On
+[VirusTotal](https://www.virustotal.com/gui/file/dff736ae7f4e783990bf781401047c2764a1dc64fe967ffe9c5cf470fa45328f),
+4 out of 71 engines flag the executable — and **all four are heuristic or machine
+learning**, not one is a signature:
+
+| engine | detection | what it means |
+|---|---|---|
+| Microsoft | `Trojan:Win32/Wacatac.B!ml` | the **`!ml`** suffix is "machine learning"; it is Microsoft's catch-all bucket |
+| SentinelOne | `Static AI - Suspicious PE` | says "static AI" in the name itself |
+| Arctic Wolf | `Unsafe` | generic, no family named |
+| SecureAge | `Malicious` | generic, no family named |
+
+The other 67 engines — Kaspersky, BitDefender, ESET, Avast, Sophos and the rest —
+flag nothing. Real malware does not slip past all of them.
+
+**Why it triggers.** Three things stacked:
+
+1. The binary is **not signed**. A signing certificate costs money per year, and
+   this project is free.
+2. PyInstaller appends the whole Python runtime as an *overlay* at the end of the
+   file — the same shape a packer uses. That is the `overlay` tag VirusTotal
+   shows.
+3. The app honestly does **the same things a trojan does**: it injects synthetic
+   input, captures the screen, enumerates another process's windows and raises
+   its own priority. Describing an automation bot and describing a RAT produces
+   nearly the same list.
+
+The third one has no fix: that is the program working. An enchanting assistant
+that neither clicked nor read the screen would be useless.
+
+**What you can do**, in order of confidence:
+
+- **Run from source** (just above). Then there is no binary for the antivirus to
+  judge, and you read exactly what you are about to execute.
+- **Check the hash** of your download against the one published in the release.
+- **Read the code.** All of it is public and the license is GPL-3.0.
+
+If you want to help fix it at the source, [docs/falso-positivo.md](docs/falso-positivo.md)
+has the four vendors' forms and the text to send.
+
 ## Usage
 
 1. **Target** — pick the affix, the condition and the value. Search matches
@@ -46,8 +88,10 @@ To build the executable and the shortcut:
 3. Press **F9**.
 
 **F9** starts and stops; **F12** only stops. Both work while the game has focus.
-There is a configurable delay (4 s) between pressing Start and the bot acting,
-so you can switch back to the game.
+
+On start the app **brings Diablo IV to the front by itself** and confirms it
+worked — then the cycle begins in 0.4 s. The configurable delay is only spent
+when Windows refuses focus, which is exactly when you need the Alt+Tab.
 
 The loop also stops if the game loses focus, if you move the mouse, or when the
 attempt and time limits are reached.
@@ -220,8 +264,10 @@ evidence matters.
 
 ## Limitations
 
-- Calibrated at **1920×1080**. The profile scales proportionally, but the D4 UI
-  does not scale exactly the same way at other resolutions.
+- Measured at **1920×1080**. Regions scale by height and are verified at
+  1920×1080, 2560×1440 and 3840×2160. On **ultrawide** (21:9) the panel's
+  horizontal position comes from a model, not a measurement — nobody has tested
+  it yet, and the app warns in the log when it detects a non-16:9 screen.
 - **English** game client.
 - Requires the game in the foreground — capture reads the monitor, not the
   window.

@@ -94,6 +94,11 @@ def empacotar(icone: Path) -> None:
         "--clean",
         "--windowed",              # sem janela de console atrás da GUI
         "--icon", str(icone),
+        # O PyInstaller comprime com UPX sozinho se achar o upx na PATH, e
+        # binario comprimido com UPX e' MUITO mais flagado por antivirus - o
+        # executavel ja' e' falso positivo de 4 motores heuristicos sem isso.
+        # Explicito para que a maquina de quem compilar nao mude o resultado.
+        "--noupx",
         # Recursos que o PyInstaller nao descobre sozinho:
         "--collect-all", "rapidocr_onnxruntime",   # modelos .onnx + config.yaml
         "--collect-all", "onnxruntime",            # DLLs do runtime

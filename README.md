@@ -6,6 +6,9 @@ Assistente de encantamento para Diablo IV. Automatiza o ciclo do Occultist:
 aperta Enchant, aceita, **lê as duas opções na tela**, decide pelas suas regras
 e repete até achar o afixo que você quer.
 
+### Demo
+Confira uma demonstração rápida do fluxo em [Demo.mp4](Demo.mp4).
+
 <p align="center">
   <img src="docs/painel.png" width="720" alt="Painel do d4forge">
 </p>

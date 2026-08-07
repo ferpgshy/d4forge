@@ -6,6 +6,9 @@ Enchanting assistant for Diablo IV. It automates the Occultist loop: press
 Enchant, accept, **read both options on screen**, decide by your rules, and
 repeat until the affix you want shows up.
 
+### Demo
+Watch a quick walkthrough of the workflow in [Demo.mp4](Demo.mp4).
+
 <p align="center">
   <img src="docs/painel.png" width="720" alt="d4forge panel">
 </p>

@@ -14,6 +14,13 @@ LANGUAGES: dict[str, str] = {
     "en": "English",
 }
 
+# Rotulo curto para o botao do cabecalho: com o nome inteiro, o botao mudava de
+# largura ao trocar de idioma e empurrava os botoes de janela para o lado.
+LANGUAGE_SHORT: dict[str, str] = {
+    "pt-BR": "PT",
+    "en": "EN",
+}
+
 STRINGS: dict[str, dict[str, str]] = {
     "pt-BR": {
         # -- janela e cabeçalho
@@ -38,18 +45,23 @@ STRINGS: dict[str, dict[str, str]] = {
         "panel.max_minutes": "Minutos",
         "panel.no_limit": "sem limite",
         "panel.start_delay": "Espera ao iniciar",
-        "panel.start_delay_tip": "Tempo para voltar ao jogo depois de apertar Iniciar.",
-        "panel.safety": "Parar quando",
-        "panel.abort_focus": "o jogo sair do foco",
-        "panel.abort_mouse": "eu mexer no mouse",
-        "panel.focus_game": "trazer o jogo para frente",
+        "panel.start_delay_tip": (
+            "Só é usada quando o Windows recusa o foco automático. Com o foco "
+            "confirmado, o ciclo começa na hora."
+        ),
+        "panel.safety": "Segurança",
+        "panel.abort_focus": "parar se o jogo sair do foco",
+        "panel.abort_mouse": "parar se eu mexer no mouse",
+        "panel.focus_game": "focar o jogo ao iniciar",
+        "panel.focus_game_tip": (
+            "Ao apertar Iniciar ou F9, traz o Diablo IV para frente sozinho. "
+            "Com isso a espera abaixo deixa de ser necessária."
+        ),
         "panel.mouse_speed": "Velocidade do mouse",
         "panel.mouse_speed_tip": (
             "Instantâneo vai direto ao alvo. Os outros imitam movimento humano "
             "e custam até 0,8 s por rodada."
         ),
-        "panel.log": "Registro",
-        "panel.rate": "{seconds:.2f} s por tentativa",
         "panel.attempts_done": "{count} tentativa(s) em {seconds:.0f}s",
         # -- alvo
         "target.box": "Parar quando aparecer",
@@ -107,6 +119,97 @@ STRINGS: dict[str, dict[str, str]] = {
         "msg.purged": "Removidos do catálogo por serem erro de leitura: {names}",
         "msg.ocr_ready": "Leitor pronto ({ms:.0f} ms)",
         "msg.catalog_loaded": "Catálogo com {count} afixos",
+        # -- mensagens do ciclo (aparecem no Registro)
+        "eng.window": "janela {w}x{h} em ({x},{y}) — escala {scale:.2f}x",
+        "eng.widescreen": (
+            "tela {w}x{h} não é 16:9. As regiões foram posicionadas pelo modelo "
+            "(painel à esquerda, diálogo centrado), não por medição nesta "
+            "proporção. Confira a primeira rodada antes de deixar rodando."
+        ),
+        "eng.limits": "limites: {limits}",
+        "eng.rules": "regras: {count} ativa(s)",
+        "eng.priority": "prioridade do processo elevada",
+        "eng.focusing": "trazendo o Diablo IV para frente",
+        "eng.focus_failed": "não consegui focar o jogo; troque com Alt+Tab",
+        "eng.countdown": "começando em {seconds:.0f}s… deixe o jogo em foco",
+        "eng.screen": "tela: {state}",
+        "eng.click": "clique em {label} ({x},{y})",
+        "eng.click_sim": "[simulado] clicaria em {label}",
+        "eng.click_retry": "a tela não mudou depois de {label}; clicando de novo",
+        "eng.sim_manual": "[simulado] a tela não muda sozinha — avance no jogo",
+        "eng.frame_saved": "quadro salvo em captures/{name}",
+        "eng.captures_cleared": "captures/ esvaziada ({count} arquivo(s) da sessão anterior)",
+        "eng.current": "atual: {affix}",
+        "eng.option": "opção {index}: {affix}",
+        "eng.option_doubt": "opção {index}: {affix}  (duvidoso)",
+        "eng.keeping": "mantendo: {reason}",
+        "eng.option_confirmed": "opção {index} confirmada na tela",
+        "eng.option_unconfirmed": "marquei a opção {index} mas a tela não confirmou; abortando",
+        "eng.orb_samples": "orbe lido nas amostras: {samples}",
+        "eng.orb_unread": "não identifiquei o orbe marcado; seguindo assim mesmo",
+        "eng.attempt": "#{index}: {options}  →  {reason}",
+        "eng.found": "afixo encontrado em {count} tentativa(s): {reason}",
+        "eng.already_ok": "o item já tem {affix}, que atende '{rule}'",
+        "eng.error": "erro inesperado: {error}",
+        # -- motivos de parada
+        "stop.cancelled": "cancelado pelo usuário",
+        "stop.no_window": "janela do Diablo IV não encontrada",
+        "stop.capture_failed": "captura de tela falhou",
+        "stop.not_foreground": (
+            "o Diablo IV não está em primeiro plano. Volte ao jogo com Alt+Tab e "
+            "aperte F9, ou aumente a espera ao iniciar."
+        ),
+        "stop.unknown_screen": (
+            "não reconheço a tela atual. Abra o Occultist na aba de encantamento."
+        ),
+        "stop.screen_stuck": (
+            "depois de {what}, a tela continuou em '{state}' por {seconds:g}s. "
+            "O clique pode ter errado o alvo."
+        ),
+        "stop.click_lost": (
+            "cliquei em {label} {attempts}x e a tela continuou em '{state}'. "
+            "Confira a calibração ou se o jogo travou."
+        ),
+        "stop.no_selection": (
+            "nenhum afixo está marcado. Escolha no jogo qual afixo trocar antes "
+            "de iniciar."
+        ),
+        "stop.unconfirmed": "não consegui confirmar a opção marcada",
+        "stop.kill_key": "tecla de parada pressionada",
+        "stop.max_attempts": "limite de {count} tentativas atingido",
+        "stop.max_gold": "limite de ouro atingido",
+        "stop.max_time": "limite de tempo atingido ({minutes:g} min)",
+        "stop.window_gone": "janela do Diablo IV sumiu",
+        "stop.lost_focus": "o jogo saiu do primeiro plano",
+        "stop.mouse_moved": "mouse em movimento — parada de segurança",
+        # -- decisões (aparecem na tabela de tentativas)
+        "decision.no_rules": "nenhuma regra ativa",
+        "decision.no_match": "nenhuma opção serve",
+        "decision.doubtful": "leitura duvidosa em {count} opção(ões)",
+        "decision.goal": "opção {index} atende '{rule}'",
+        "decision.climb_first": "opção {index} — troca '{held}' pelo alvo",
+        "decision.climb_up": "opção {index} — sobe de {current:g} para {value:g}",
+        # -- painel de progresso
+        "progress.title": "Progresso",
+        "progress.attempts": "Tentativas",
+        "progress.elapsed": "Tempo",
+        "progress.rate": "Ritmo",
+        "progress.current": "Afixo atual",
+        "progress.col_n": "#",
+        "progress.col_opt1": "Opção 1",
+        "progress.col_opt2": "Opção 2",
+        "progress.col_result": "Resultado",
+        "progress.kept": "manteve",
+        "progress.took": "trocou",
+        "progress.none": "—",
+        "progress.details": "Detalhes técnicos",
+        "progress.empty": "As tentativas aparecem aqui assim que o ciclo começa.",
+        "progress.took_n": "pegou a opção {index}",
+        "speed.humano": "humano",
+        "speed.rápido": "rápido",
+        "speed.instantâneo": "instantâneo",
+        "progress.goal": "alvo atingido",
+        "progress.rate_unit": "{seconds:.1f} s",
     },
     "en": {
         "app.title": "d4forge",
@@ -128,18 +231,23 @@ STRINGS: dict[str, dict[str, str]] = {
         "panel.max_minutes": "Minutes",
         "panel.no_limit": "no limit",
         "panel.start_delay": "Delay on start",
-        "panel.start_delay_tip": "Time to switch back to the game after pressing Start.",
-        "panel.safety": "Stop when",
-        "panel.abort_focus": "the game loses focus",
-        "panel.abort_mouse": "I move the mouse",
-        "panel.focus_game": "bring the game to front",
+        "panel.start_delay_tip": (
+            "Only used when Windows refuses the automatic focus. With focus "
+            "confirmed, the cycle starts right away."
+        ),
+        "panel.safety": "Safety",
+        "panel.abort_focus": "stop if the game loses focus",
+        "panel.abort_mouse": "stop if I move the mouse",
+        "panel.focus_game": "focus the game on start",
+        "panel.focus_game_tip": (
+            "Pressing Start or F9 brings Diablo IV to the front by itself. "
+            "That makes the delay below unnecessary."
+        ),
         "panel.mouse_speed": "Mouse speed",
         "panel.mouse_speed_tip": (
             "Instant jumps straight to the target. The others mimic human "
             "movement and cost up to 0.8 s per round."
         ),
-        "panel.log": "Log",
-        "panel.rate": "{seconds:.2f} s per attempt",
         "panel.attempts_done": "{count} attempt(s) in {seconds:.0f}s",
         "target.box": "Stop when this shows up",
         "target.slot": "Slot",
@@ -193,6 +301,92 @@ STRINGS: dict[str, dict[str, str]] = {
         "msg.purged": "Removed from the catalog as misreads: {names}",
         "msg.ocr_ready": "Reader ready ({ms:.0f} ms)",
         "msg.catalog_loaded": "Catalog with {count} affixes",
+        "eng.window": "window {w}x{h} at ({x},{y}) — scale {scale:.2f}x",
+        "eng.widescreen": (
+            "screen {w}x{h} is not 16:9. Regions were placed by model (panel on "
+            "the left, dialog centered), not measured at this aspect ratio. "
+            "Watch the first round before leaving it running."
+        ),
+        "eng.limits": "limits: {limits}",
+        "eng.rules": "rules: {count} active",
+        "eng.priority": "process priority raised",
+        "eng.focusing": "bringing Diablo IV to the front",
+        "eng.focus_failed": "could not focus the game; switch with Alt+Tab",
+        "eng.countdown": "starting in {seconds:.0f}s… keep the game focused",
+        "eng.screen": "screen: {state}",
+        "eng.click": "clicked {label} ({x},{y})",
+        "eng.click_sim": "[simulated] would click {label}",
+        "eng.click_retry": "screen did not change after {label}; clicking again",
+        "eng.sim_manual": "[simulated] the screen will not advance on its own",
+        "eng.frame_saved": "frame saved to captures/{name}",
+        "eng.captures_cleared": "captures/ emptied ({count} file(s) from the last session)",
+        "eng.current": "current: {affix}",
+        "eng.option": "option {index}: {affix}",
+        "eng.option_doubt": "option {index}: {affix}  (doubtful)",
+        "eng.keeping": "keeping: {reason}",
+        "eng.option_confirmed": "option {index} confirmed on screen",
+        "eng.option_unconfirmed": "picked option {index} but the screen did not confirm; aborting",
+        "eng.orb_samples": "orb read across samples: {samples}",
+        "eng.orb_unread": "could not identify the selected orb; carrying on",
+        "eng.attempt": "#{index}: {options}  →  {reason}",
+        "eng.found": "affix found in {count} attempt(s): {reason}",
+        "eng.already_ok": "the item already has {affix}, which satisfies '{rule}'",
+        "eng.error": "unexpected error: {error}",
+        "stop.cancelled": "cancelled by the user",
+        "stop.no_window": "Diablo IV window not found",
+        "stop.capture_failed": "screen capture failed",
+        "stop.not_foreground": (
+            "Diablo IV is not in the foreground. Switch back with Alt+Tab and "
+            "press F9, or raise the start delay."
+        ),
+        "stop.unknown_screen": (
+            "I do not recognize this screen. Open the Occultist on the enchant tab."
+        ),
+        "stop.screen_stuck": (
+            "after {what}, the screen stayed on '{state}' for {seconds:g}s. "
+            "The click may have missed its target."
+        ),
+        "stop.click_lost": (
+            "clicked {label} {attempts}x and the screen stayed on '{state}'. "
+            "Check the calibration or whether the game froze."
+        ),
+        "stop.no_selection": (
+            "no affix is selected. Pick the affix to reroll in game before starting."
+        ),
+        "stop.unconfirmed": "could not confirm the selected option",
+        "stop.kill_key": "stop key pressed",
+        "stop.max_attempts": "reached the limit of {count} attempts",
+        "stop.max_gold": "gold limit reached",
+        "stop.max_time": "time limit reached ({minutes:g} min)",
+        "stop.window_gone": "the Diablo IV window disappeared",
+        "stop.lost_focus": "the game lost focus",
+        "stop.mouse_moved": "mouse moving — safety stop",
+        "decision.no_rules": "no active rule",
+        "decision.no_match": "no option qualifies",
+        "decision.doubtful": "doubtful reading on {count} option(s)",
+        "decision.goal": "option {index} satisfies '{rule}'",
+        "decision.climb_first": "option {index} — swaps '{held}' for the target",
+        "decision.climb_up": "option {index} — climbs from {current:g} to {value:g}",
+        "progress.title": "Progress",
+        "progress.attempts": "Attempts",
+        "progress.elapsed": "Elapsed",
+        "progress.rate": "Rate",
+        "progress.current": "Current affix",
+        "progress.col_n": "#",
+        "progress.col_opt1": "Option 1",
+        "progress.col_opt2": "Option 2",
+        "progress.col_result": "Result",
+        "progress.kept": "kept",
+        "progress.took": "took",
+        "progress.none": "—",
+        "progress.details": "Technical details",
+        "progress.empty": "Attempts show up here once the cycle starts.",
+        "progress.took_n": "took option {index}",
+        "speed.humano": "human",
+        "speed.rápido": "fast",
+        "speed.instantâneo": "instant",
+        "progress.goal": "goal reached",
+        "progress.rate_unit": "{seconds:.1f} s",
     },
 }
 

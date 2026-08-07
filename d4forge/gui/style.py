@@ -40,9 +40,11 @@ QWidget#shell {{
     border: 1px solid {BORDA_CLARA};
 }}
 
+/* Cor chapada, e nao gradiente: entre #1f1a13 e #262019 ha' sete niveis de
+   diferenca, e espalha-los por mil pixels rendia degraus visiveis - parecia um
+   retangulo mais claro colado no meio do cabecalho. */
 QFrame#header {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #1f1a13, stop:0.5 #262019, stop:1 #1f1a13);
+    background: #221c15;
     border: none;
     border-bottom: 1px solid {DOURADO_FRACO};
 }}
@@ -145,9 +147,13 @@ QPushButton#globe {{
     background: transparent;
     border: 1px solid {BORDA};
     border-radius: 14px;
-    padding: 4px 10px;
+    padding: 0 12px;
     color: {TEXTO_FRACO};
+    font-size: 12px;
+    text-align: center;
 }}
+/* Nao usamos setMenu(), mas garantimos que nenhuma seta nativa apareca. */
+QPushButton#globe::menu-indicator {{ image: none; width: 0; }}
 QPushButton#globe:hover {{ color: {DOURADO}; border-color: {DOURADO_FRACO}; }}
 
 /* -------------------------------------------------- campos */
@@ -217,6 +223,50 @@ QScrollBar:horizontal {{ background: {FUNDO}; height: 10px; }}
 QScrollBar::handle:horizontal {{
     background: {BORDA_CLARA}; border-radius: 5px; min-width: 30px;
 }}
+
+/* -------------------------------------------------- menus */
+QMenu {{
+    background: {FUNDO_CARTAO};
+    border: 1px solid {BORDA_CLARA};
+    border-radius: 4px;
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 8px 24px 8px 16px;
+    border-radius: 3px;
+    color: {TEXTO};
+}}
+QMenu::item:selected {{
+    background: #3a3126;
+    color: {DOURADO};
+}}
+QMenu::separator {{
+    height: 1px;
+    background: {BORDA};
+    margin: 4px 8px;
+}}
+
+/* ------------------------------------------- painel de progresso */
+QFrame#metric {{
+    background: {FUNDO_CAMPO};
+    border: 1px solid {BORDA};
+    border-radius: 5px;
+}}
+QTableWidget#attempts {{
+    alternate-background-color: #171310;
+    font-size: 12px;
+}}
+QTableWidget#attempts::item {{ padding: 5px 8px; }}
+/* Botao que parece link: abre os detalhes tecnicos sem pedir destaque. */
+QToolButton[role="link"] {{
+    background: transparent;
+    border: none;
+    color: {TEXTO_FRACO};
+    padding: 2px 4px;
+    font-size: 12px;
+}}
+QToolButton[role="link"]:hover {{ color: {DOURADO}; }}
+QToolButton[role="link"]:checked {{ color: {DOURADO}; }}
 
 QToolTip {{
     background: #241e18;

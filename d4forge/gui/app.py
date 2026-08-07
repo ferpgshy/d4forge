@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QStringListModel, QTimer
+from PySide6.QtCore import Qt, QPoint, QStringListModel, QTimer
 from PySide6.QtGui import QFont, QIcon, QValidator
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QStyledItemDelegate,
@@ -41,13 +40,14 @@ from ..automation.sendinput import DEFAULT_PROFILE as DEFAULT_INPUT
 from ..automation.sendinput import PROFILES
 from ..catalog_import import import_full_catalog, purge_ocr_garbage
 from ..engine import EnchantEngine, EngineEvent, EventKind, Outcome
-from ..i18n import LANGUAGES, set_language, t
+from ..i18n import LANGUAGE_SHORT, LANGUAGES, set_language, t
 from ..profile import DEFAULT_PROFILE
 from ..profiling import Profiler
 from ..rules import Comparison, RuleSet, TargetRule
 from ..vision.ocr import OcrEngine
 from . import style
 from .frameless import FramelessMixin, TitleBarArea
+from .progress import ProgressPanel
 from .worker import EngineWorker, WarmupWorker
 
 VK_F9 = 0x78
@@ -166,8 +166,12 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._catalog_carregado = False
 
         self.setWindowTitle(t("app.window"))
-        self.resize(1020, 760)
-        self.setMinimumSize(860, 620)
+        self.resize(1040, 840)
+        # Sem setMinimumSize fixo: um mínimo MENOR do que o layout precisa não
+        # impede o encolhimento, ele só deixa os widgets se sobreporem — era o
+        # que fazia os detalhes técnicos invadirem a tabela. O mínimo que o Qt
+        # calcula do próprio layout é o único que sempre confere.
+        self.setMinimumWidth(880)
         self.setup_frameless()
 
         icone = Path(config.RESOURCE_DIR) / "d4forge" / "resources" / "d4forge.ico"
@@ -201,8 +205,8 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._reload_target()
 
         if self.app.purged:
-            self._log(t("msg.purged", names=", ".join(self.app.purged)))
-        self._log(t("msg.catalog_loaded", count=len(self.app.catalog)))
+            self._note("msg.purged", names=", ".join(self.app.purged))
+        self._note("msg.catalog_loaded", count=len(self.app.catalog))
 
         # Atalho global: funciona com o Diablo IV em foco, que é quando a
         # janela do app está inacessível.
@@ -215,7 +219,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         # Carrega o leitor agora, para o custo de partida não cair sobre a
         # primeira leitura do ciclo.
         self._warmup = WarmupWorker(self.app)
-        self._warmup.ready.connect(lambda ms: self._log(t("msg.ocr_ready", ms=ms)))
+        self._warmup.ready.connect(lambda ms: self._note("msg.ocr_ready", ms=ms))
         self._warmup.start()
 
     # ---------------------------------------------------------- cabeçalho
@@ -238,10 +242,11 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.btn_lang = QPushButton()
         self.btn_lang.setObjectName("globe")
         self.btn_lang.setCursor(Qt.CursorShape.PointingHandCursor)
-        menu = QMenu(self)
-        for code, nome in LANGUAGES.items():
-            menu.addAction(nome, lambda checked=False, c=code: self._set_language(c))
-        self.btn_lang.setMenu(menu)
+        self.btn_lang.setFixedHeight(28)
+        # Sem setMenu(): o Qt reservaria espaço para a seta nativa por baixo do
+        # nosso "▾" e o rótulo ficava espremido. Abrimos o menu na mão, o que de
+        # quebra deixa alinhá-lo pela direita do botão.
+        self.btn_lang.clicked.connect(self._open_lang_menu)
         self._refresh_lang_button()
         topo.addWidget(self.btn_lang)
         topo.addSpacing(10)
@@ -276,7 +281,23 @@ class MainWindow(FramelessMixin, QMainWindow):
         return header
 
     def _refresh_lang_button(self) -> None:
-        self.btn_lang.setText(f"  {LANGUAGES.get(self.app.settings.language, '')}  ▾")
+        atual = self.app.settings.language
+        self.btn_lang.setText(f"🌐 {LANGUAGE_SHORT.get(atual, atual)} ▾")
+        self.btn_lang.setToolTip(LANGUAGES.get(atual, atual))
+
+    def _open_lang_menu(self) -> None:
+        """Menu ancorado pela direita do botão, com o idioma atual marcado."""
+        menu = QMenu(self)
+        atual = self.app.settings.language
+        for code, nome in LANGUAGES.items():
+            acao = menu.addAction(nome)
+            acao.setCheckable(True)
+            acao.setChecked(code == atual)
+            acao.triggered.connect(lambda _=False, c=code: self._set_language(c))
+
+        canto = self.btn_lang.mapToGlobal(self.btn_lang.rect().bottomRight())
+        largura = menu.sizeHint().width()
+        menu.exec(canto + QPoint(-largura, 4))
 
     def _set_language(self, code: str) -> None:
         if code == self.app.settings.language:
@@ -295,7 +316,6 @@ class MainWindow(FramelessMixin, QMainWindow):
         """
         indice = self.tabs.currentIndex()
         self._save_target(silencioso=True)
-        registro = self.log.toPlainText()
 
         self.setUpdatesEnabled(False)
         try:
@@ -310,7 +330,7 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.tabs.setCurrentIndex(indice)
 
             self._reload_target()
-            self.log.setPlainText(registro)
+            self.progress.retranslate()
             self.lbl_subtitle.setText(t("app.subtitle"))
             self._refresh_lang_button()
         finally:
@@ -405,27 +425,29 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.chk_mouse.setChecked(self.app.settings.abort_on_mouse_move)
         self.chk_focus = QCheckBox(t("panel.focus_game"))
         self.chk_focus.setChecked(self.app.settings.focus_game_on_start)
+        self.chk_focus.setToolTip(t("panel.focus_game_tip"))
         col2.addWidget(self.chk_foreground)
         col2.addWidget(self.chk_mouse)
         col2.addWidget(self.chk_focus)
 
         self.cmb_speed = QComboBox()
+        # O texto visível é traduzido; o valor guardado continua sendo o rótulo
+        # do perfil, que é a chave de PROFILES e do settings.json.
         for label in PROFILES:
-            self.cmb_speed.addItem(label)
-        self.cmb_speed.setCurrentText(self.app.settings.input_speed)
+            self.cmb_speed.addItem(t(f"speed.{label}"), label)
+        atual = self.cmb_speed.findData(self.app.settings.input_speed)
+        self.cmb_speed.setCurrentIndex(max(0, atual))
         self.cmb_speed.setToolTip(t("panel.mouse_speed_tip"))
         col2.addLayout(_campo(t("panel.mouse_speed"), self.cmb_speed))
         col2.addStretch()
         cartoes.addWidget(seguranca, 1)
         layout.addLayout(cartoes)
 
-        registro = QGroupBox(t("panel.log"))
-        col3 = QVBoxLayout(registro)
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setMaximumBlockCount(3000)
-        col3.addWidget(self.log)
-        layout.addWidget(registro, 1)
+        # Um só painel para a vida toda da janela: trocar de idioma recria as
+        # abas, e um painel novo perderia as tentativas da sessão em curso.
+        if not hasattr(self, "progress"):
+            self.progress = ProgressPanel()
+        layout.addWidget(self.progress, 1)
 
         self.box_unknown = QGroupBox(t("unknown.box"))
         self.box_unknown.setVisible(False)
@@ -685,7 +707,7 @@ class MainWindow(FramelessMixin, QMainWindow):
                 try:
                     slots.add(Slot(token))
                 except ValueError:
-                    self._log(t("catalog.unknown_slot", slot=token))
+                    self._note("catalog.unknown_slot", slot=token)
 
             # A tabela não exibe unit_confirmed; sem este cuidado, salvar
             # apagaria as confirmações. Trocar a unidade conta como confirmar.
@@ -705,7 +727,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         catalogo.save(config.CATALOG_PATH)
         self._refresh_affix_choices()
         self.lbl_catalog_count.setText(t("catalog.count", count=len(catalogo)))
-        self._log(t("catalog.saved", count=len(catalogo)))
+        self._note("catalog.saved", count=len(catalogo))
 
     # ------------------------------------------------- afixos novos vistos
     def _note_unknown(self, evt: EngineEvent) -> None:
@@ -738,7 +760,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._refresh_affix_choices()
         self._unknown.clear()
         self.box_unknown.setVisible(False)
-        self._log(t("unknown.added", count=adicionados))
+        self._note("unknown.added", count=adicionados)
 
     # ------------------------------------------------------ atalho global
     def _poll_hotkeys(self) -> None:
@@ -757,7 +779,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         s.require_foreground = self.chk_foreground.isChecked()
         s.abort_on_mouse_move = self.chk_mouse.isChecked()
         s.focus_game_on_start = self.chk_focus.isChecked()
-        s.input_speed = self.cmb_speed.currentText()
+        s.input_speed = self.cmb_speed.currentData() or DEFAULT_INPUT.label
         s.save()
 
     def _set_status(self, chave: str) -> None:
@@ -799,7 +821,7 @@ class MainWindow(FramelessMixin, QMainWindow):
             input_profile=PROFILES.get(s.input_speed, DEFAULT_INPUT),
         )
 
-        self.log.clear()
+        self.progress.reset()
         self.engine_worker = EngineWorker(engine)
         self.engine_worker.event.connect(self._on_event)
         self.engine_worker.finished_run.connect(self._on_finished)
@@ -816,13 +838,7 @@ class MainWindow(FramelessMixin, QMainWindow):
             self._set_status("stopping")
 
     def _on_event(self, evt: EngineEvent) -> None:
-        prefixo = {
-            EventKind.SUCCESS: ">>>",
-            EventKind.ERROR: "!!!",
-            EventKind.STOPPED: "---",
-            EventKind.ATTEMPT: " * ",
-        }.get(evt.kind, "   ")
-        self._log(f"{prefixo} {evt.message}")
+        self.progress.push(evt)
         if evt.kind is EventKind.READ:
             self._note_unknown(evt)
         elif evt.kind in (EventKind.STATE, EventKind.INFO):
@@ -832,20 +848,24 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self._set_status("found" if outcome.found else "idle")
+        self.progress.finish(outcome)
         resumo = t("panel.attempts_done", count=outcome.count, seconds=outcome.elapsed_s)
         self.substatus.setText(f"{resumo} — {outcome.reason}")
-        if outcome.count:
-            self._log("    " + t("panel.rate", seconds=outcome.elapsed_s / outcome.count))
         self.app.save()
 
-    def _log(self, texto: str) -> None:
-        self.log.appendPlainText(texto)
+    def _note(self, key: str, **data) -> None:
+        self.progress.note(key, **data)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - assinatura do Qt
         self._hotkeys.stop()
         if self.engine_worker and self.engine_worker.isRunning():
             self.engine_worker.stop()
             self.engine_worker.wait(2000)
+        # O aquecimento do OCR leva ~300 ms depois de a janela abrir. Fechar
+        # nesse intervalo destruía uma QThread em execução — comportamento
+        # indefinido, e o processo caía com 0xC0000409 no encerramento.
+        if self._warmup.isRunning():
+            self._warmup.wait(3000)
         self._collect_settings()
         self.app.save()
 

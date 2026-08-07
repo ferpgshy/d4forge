@@ -7,12 +7,34 @@ assumimos isso: sempre perguntamos ao Windows onde o retangulo do cliente esta.
 from __future__ import annotations
 
 import ctypes
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 
 from .geometry import Rect
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+SW_RESTORE = 9
+
+# Sem restype/argtypes o ctypes trata todo handle como int de 32 bits. Um HWND
+# de 64 bits chega truncado e a chamada falha em silencio - foi exatamente esse
+# descuido que manteve `set_high_priority` devolvendo False por semanas.
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.restype = wintypes.BOOL
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.IsIconic.restype = wintypes.BOOL
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.AttachThreadInput.restype = wintypes.BOOL
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 # Nomes de janela/classe que o D4 usa. A classe e' mais estavel que o titulo.
 WINDOW_TITLES = ("Diablo IV",)
@@ -34,9 +56,45 @@ class GameWindow:
     def is_foreground(self) -> bool:
         return user32.GetForegroundWindow() == self.hwnd
 
-    def focus(self) -> None:
-        user32.ShowWindow(self.hwnd, 9)  # SW_RESTORE
-        user32.SetForegroundWindow(self.hwnd)
+    def focus(self, timeout: float = 1.5) -> bool:
+        """Traz o jogo para o primeiro plano. Devolve se conseguiu de fato.
+
+        Tres cuidados que a versao ingenua nao tinha:
+
+        * `SW_RESTORE` so' quando a janela esta' MINIMIZADA. Aplicado a uma
+          janela maximizada, ele a desmaximiza - o app mudaria o tamanho da tela
+          do jogo so' por tentar focar.
+        * O Windows nao deixa qualquer processo roubar o primeiro plano.
+          Anexar nossa fila de entrada a' da janela em foco satisfaz a regra;
+          sem isso `SetForegroundWindow` costuma nao fazer nada e ainda assim
+          dizer que deu certo.
+        * Conferir o resultado em vez de acreditar no retorno. Quem chama
+          precisa saber se o jogo esta' mesmo na frente antes de clicar.
+        """
+        if self.is_foreground:
+            return True
+
+        if user32.IsIconic(self.hwnd):
+            user32.ShowWindow(self.hwnd, SW_RESTORE)
+
+        nosso = kernel32.GetCurrentThreadId()
+        deles = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+        anexado = bool(deles) and deles != nosso and bool(
+            user32.AttachThreadInput(nosso, deles, True)
+        )
+        try:
+            user32.SetForegroundWindow(self.hwnd)
+            user32.BringWindowToTop(self.hwnd)
+        finally:
+            if anexado:
+                user32.AttachThreadInput(nosso, deles, False)
+
+        limite = time.monotonic() + timeout
+        while time.monotonic() < limite:
+            if self.is_foreground:
+                return True
+            time.sleep(0.03)
+        return False
 
 
 def _enable_dpi_awareness() -> None:

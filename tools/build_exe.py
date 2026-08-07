@@ -74,6 +74,17 @@ def limpar() -> None:
     spec = ROOT / f"{NOME}.spec"
     spec.unlink(missing_ok=True)
 
+    # `ignore_errors` acima faz a limpeza passar em silencio quando um arquivo
+    # esta' travado - e ai o PyInstaller quebra la' na frente com um traceback
+    # de PermissionError em cv2.pyd, que nao diz o que fazer. A causa e' quase
+    # sempre uma copia do proprio app ainda aberta.
+    restante = ROOT / "dist" / NOME
+    if restante.exists():
+        raise SystemExit(
+            f"nao consegui limpar {restante}.\n"
+            f"Feche o {NOME}.exe se ele estiver aberto e rode de novo."
+        )
+
 
 def empacotar(icone: Path) -> None:
     args = [

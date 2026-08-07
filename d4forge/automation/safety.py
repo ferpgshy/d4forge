@@ -68,7 +68,22 @@ def set_high_priority(enable: bool = True) -> bool:
 
 
 class StopReason(Exception):
-    """Motivo pelo qual o loop parou."""
+    """Motivo pelo qual o loop parou.
+
+    Carrega a chave de traducao e os argumentos em vez do texto pronto: o motivo
+    fica guardado no resultado da sessao e precisa ser reapresentado no idioma
+    que estiver valendo quando o usuario olhar.
+    """
+
+    def __init__(self, key: str, **params) -> None:
+        self.key = key
+        self.params = params
+        super().__init__(key)
+
+    def __str__(self) -> str:
+        from ..i18n import t
+
+        return t(self.key, **self.params)
 
 
 @dataclass
@@ -80,9 +95,11 @@ class Limits:
     max_minutes: float | None = 60.0
 
     def describe(self) -> str:
-        parts = [f"{self.max_attempts} tentativas"]
+        from ..i18n import t
+
+        parts = [f"{self.max_attempts} {t('progress.attempts').lower()}"]
         if self.max_gold is not None:
-            parts.append(f"{self.max_gold:,} de ouro".replace(",", "."))
+            parts.append(f"{self.max_gold:,}".replace(",", "."))
         if self.max_minutes is not None:
             parts.append(f"{self.max_minutes:g} min")
         return " / ".join(parts)
@@ -127,23 +144,23 @@ class Guard:
     def check(self) -> None:
         """Levanta StopReason se qualquer trava disparar."""
         if key_is_down(self.kill_key):
-            raise StopReason("tecla de parada pressionada")
+            raise StopReason("stop.kill_key")
 
         if self.attempts >= self.limits.max_attempts:
-            raise StopReason(f"limite de {self.limits.max_attempts} tentativas atingido")
+            raise StopReason("stop.max_attempts", count=self.limits.max_attempts)
 
         if self.limits.max_gold is not None and self.gold_spent >= self.limits.max_gold:
-            raise StopReason(f"limite de ouro atingido ({self.gold_spent:,})".replace(",", "."))
+            raise StopReason("stop.max_gold")
 
         if self.limits.max_minutes is not None and self.elapsed_minutes >= self.limits.max_minutes:
-            raise StopReason(f"limite de tempo atingido ({self.limits.max_minutes:g} min)")
+            raise StopReason("stop.max_time", minutes=self.limits.max_minutes)
 
         if self.require_foreground:
             win = find_game_window()
             if win is None:
-                raise StopReason("janela do Diablo IV sumiu")
+                raise StopReason("stop.window_gone")
             if not win.is_foreground:
-                raise StopReason("o jogo saiu do primeiro plano")
+                raise StopReason("stop.lost_focus")
 
         if self.abort_on_mouse_move and self._last_click is not None:
             now = cursor_position()
@@ -160,7 +177,7 @@ class Guard:
             else:
                 motion = abs(now.x - self._drift_anchor.x) + abs(now.y - self._drift_anchor.y)
                 if motion > self.motion_tolerance:
-                    raise StopReason("mouse em movimento — parada de segurança")
+                    raise StopReason("stop.mouse_moved")
                 # Parado no novo lugar: foi um salto isolado. O ponto vira a
                 # nova referencia; qualquer movimento a partir dele aborta.
                 self._drift_anchor = now

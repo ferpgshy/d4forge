@@ -76,6 +76,7 @@ class RenderSpec:
         return self.margin, self.margin + mask_width * self.scale
 
 
+
 # Padrao. Borda dura em 4x acerta a grande maioria das linhas.
 PRIMARY_RENDER = RenderSpec(scale=4, margin=16)
 

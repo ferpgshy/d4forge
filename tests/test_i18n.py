@@ -60,7 +60,7 @@ def test_argumento_faltando_nao_quebra():
 
 # ------------------------------------------------------ versão final da GUI
 
-def test_versao_final_da_interface(qt_app):
+def test_versao_final_da_interface(qt_app, config_isolada):
     from d4forge.gui.app import AppState, MainWindow
 
     janela = MainWindow(AppState.load())
@@ -78,7 +78,7 @@ def test_versao_final_da_interface(qt_app):
         janela.close()
 
 
-def test_troca_de_idioma_redesenha_a_janela(qt_app):
+def test_troca_de_idioma_redesenha_a_janela(qt_app, config_isolada):
     from d4forge.gui.app import AppState, MainWindow
 
     janela = MainWindow(AppState.load())
@@ -94,7 +94,56 @@ def test_troca_de_idioma_redesenha_a_janela(qt_app):
         janela.close()
 
 
-def test_troca_de_idioma_preserva_o_alvo(qt_app):
+def test_botao_de_idioma_nao_muda_de_largura(qt_app, config_isolada):
+    """O rótulo era o nome inteiro ("Português (BR)" vs "English"): o botão
+    encolhia ao trocar para inglês e arrastava os botões de janela junto."""
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.show()
+        largura_pt = janela.btn_lang.sizeHint().width()
+        assert janela.btn_lang.text() == "🌐 PT ▾"
+
+        janela._set_language("en")
+        assert janela.btn_lang.text() == "🌐 EN ▾"
+        assert janela.btn_lang.sizeHint().width() == largura_pt
+        # o nome por extenso continua acessível
+        assert janela.btn_lang.toolTip() == "English"
+    finally:
+        janela.close()
+
+
+def test_registro_acompanha_a_troca_de_idioma(qt_app, config_isolada):
+    """Bug relatado: o Registro continuava em português depois de trocar para
+    inglês, porque guardávamos a frase pronta em vez do evento."""
+    from d4forge.engine import EngineEvent, EventKind
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.progress.reset()
+        janela._on_event(EngineEvent(EventKind.INFO, "eng.rules", {"count": 2}))
+        assert "ativa(s)" in janela.progress.detalhes.toPlainText()
+
+        janela._set_language("en")
+        texto = janela.progress.detalhes.toPlainText()
+        assert "active" in texto and "ativa(s)" not in texto
+    finally:
+        janela.close()
+
+
+def test_fechar_espera_o_aquecimento_do_ocr(qt_app, config_isolada):
+    """Fechar a janela enquanto a WarmupWorker rodava destruía uma QThread viva
+    e derrubava o processo (0xC0000409) no encerramento."""
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    janela.close()
+    assert not janela._warmup.isRunning()
+
+
+def test_troca_de_idioma_preserva_o_alvo(qt_app, config_isolada):
     from d4forge.gui.app import AppState, MainWindow
 
     janela = MainWindow(AppState.load())

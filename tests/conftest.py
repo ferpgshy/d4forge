@@ -64,3 +64,52 @@ def catalog():
     from d4forge.affixes import AffixCatalog
 
     return AffixCatalog.seeded()
+
+
+@pytest.fixture(scope="session")
+def qt_app():
+    """QApplication unica da sessao; o Qt nao aceita duas."""
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def config_isolada(tmp_path, monkeypatch):
+    """Aponta o config para um diretorio descartavel.
+
+    Sem isto, qualquer teste que monta a MainWindow escreve no `data/` de
+    verdade: `closeEvent` salva catalogo e ajustes e esvazia `captures/`. Ja'
+    aconteceu de uma rodada de testes destruir o catalogo do usuario, e de
+    deixar o app aberto em ingles porque um teste trocou o idioma e salvou.
+
+    O catalogo continua vindo cheio: `import_full_catalog` o preenche a partir
+    da lista embutida, nao do arquivo do usuario.
+    """
+    from d4forge import config
+
+    dados = tmp_path / "data"
+    dados.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", dados)
+    monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
+    monkeypatch.setattr(config, "SETTINGS_PATH", dados / "settings.json")
+    monkeypatch.setattr(config, "CATALOG_PATH", dados / "affixes.json")
+    monkeypatch.setattr(config, "RULES_PATH", dados / "rules.json")
+    monkeypatch.setattr(config, "TIMINGS_PATH", dados / "timings.json")
+    return dados
+
+
+@pytest.fixture(autouse=True)
+def idioma_padrao():
+    """Idioma de volta ao padrao antes de cada teste.
+
+    O i18n guarda o idioma corrente num global, entao um teste que troca para
+    ingles contaminava todos os que rodassem depois - e o efeito aparecia longe
+    dali, em asserts sobre mensagens do engine. Restaurar aqui e' de graca e
+    corta a classe de problema inteira.
+    """
+    from d4forge import i18n
+
+    i18n.set_language(i18n.DEFAULT)
+    yield
+    i18n.set_language(i18n.DEFAULT)

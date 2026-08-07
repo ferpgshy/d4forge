@@ -96,9 +96,9 @@ def test_pula_dialogo_de_confirmacao(scripted):
 
     outcome = engine.run()
 
-    assert "confirmação" not in outcome.reason
+    assert outcome.reason_key != "stop.screen_stuck"
     assert outcome.count == 2, outcome.reason
-    assert "tentativas" in outcome.reason  # parou no limite, nao por erro
+    assert outcome.reason_key == "stop.max_attempts"  # parou no limite, nao por erro
 
 
 def test_usa_o_dialogo_quando_ele_aparece(scripted):
@@ -129,7 +129,7 @@ def test_aborta_se_o_orbe_nao_confirma(scripted):
 
     outcome = engine.run()
     assert not outcome.found
-    assert "confirmar a opção" in outcome.reason
+    assert outcome.reason_key == "stop.unconfirmed"
 
 
 def test_confirmacao_do_orbe_tolera_a_animacao(scripted, monkeypatch):
@@ -159,7 +159,7 @@ def test_item_que_ja_cumpre_a_meta_nao_gasta_material(scripted):
     assert outcome.found
     assert outcome.count == 0          # nenhuma tentativa
     assert screen.step == 0            # nenhum clique
-    assert "já tem" in outcome.reason
+    assert outcome.reason_key == "eng.already_ok"
 
 
 def test_clique_perdido_e_repetido_em_vez_de_derrubar_a_sessao(scripted, monkeypatch):
@@ -258,4 +258,4 @@ def test_tela_desconhecida_para_com_mensagem_clara(scripted, shots):
 
     outcome = engine.run()
     assert not outcome.found
-    assert "não reconheço a tela" in outcome.reason
+    assert outcome.reason_key == "stop.unknown_screen"

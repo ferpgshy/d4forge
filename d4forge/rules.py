@@ -140,10 +140,19 @@ class Action(Enum):
 class Decision:
     action: Action
     rule: TargetRule | None
-    reason: str
+    # Chave de traducao + argumentos, nao texto pronto: a decisao e' guardada no
+    # historico e precisa ser reapresentada no idioma que estiver valendo.
+    key: str = ""
+    params: dict = field(default_factory=dict)
     # A opcao escolhida ja' cumpre a meta final? Um degrau de escalada e'
     # aceito (accepted=True) mas nao encerra a sessao (goal_reached=False).
     goal_reached: bool = False
+
+    @property
+    def reason(self) -> str:
+        from .i18n import t
+
+        return t(self.key, **self.params) if self.key else ""
 
     @property
     def accepted(self) -> bool:
@@ -184,10 +193,7 @@ class RuleSet:
             if not rule.same_affix(current):
                 # O item ainda nao tem o afixo-alvo: qualquer valor dele e'
                 # melhor do que continuar com o afixo errado.
-                return rule, (
-                    f"escalada: pega {parsed.describe()} "
-                    f"(o item tem '{current.name}')"
-                )
+                return rule, ("decision.climb_first", {"held": current.name})
             if (
                 parsed.value is not None
                 and current.value is not None
@@ -195,7 +201,8 @@ class RuleSet:
             ):
                 # Estritamente maior: valor igual seria troca inutil.
                 return rule, (
-                    f"escalada: {parsed.value:g} > {current.value:g} atuais"
+                    "decision.climb_up",
+                    {"value": parsed.value, "current": current.value},
                 )
         return None
 
@@ -209,10 +216,10 @@ class RuleSet:
         e depois so' subir, ate' a meta da regra.
         """
         if not self.active:
-            return Decision(Action.NO_CHANGE, None, "nenhuma regra ativa")
+            return Decision(Action.NO_CHANGE, None, "decision.no_rules")
 
-        # (indice, regra, opcao, cumpre_meta, motivo)
-        candidates: list[tuple[int, TargetRule, ParsedAffix, bool, str]] = []
+        # (indice, regra, opcao, cumpre_meta, chave, argumentos)
+        candidates: list[tuple[int, TargetRule, ParsedAffix, bool, str, dict]] = []
         for idx, parsed in enumerate(options):
             if idx > 1:
                 break
@@ -220,14 +227,15 @@ class RuleSet:
                 continue
             rule = self.first_match(parsed)
             if rule is not None:
-                candidates.append(
-                    (idx, rule, parsed, True, f"opção {idx + 1} atende '{rule.describe()}'")
-                )
+                candidates.append((
+                    idx, rule, parsed, True, "decision.goal",
+                    {"index": idx + 1, "rule": rule.describe()},
+                ))
                 continue
             climb = self._climb_match(parsed, current)
             if climb is not None:
-                rule, why = climb
-                candidates.append((idx, rule, parsed, False, f"opção {idx + 1} — {why}"))
+                rule, (chave, args) = climb
+                candidates.append((idx, rule, parsed, False, chave, {**args, "index": idx + 1}))
 
         if not candidates:
             unsure = [
@@ -236,19 +244,18 @@ class RuleSet:
             ]
             if unsure:
                 return Decision(
-                    Action.NO_CHANGE, None,
-                    f"leitura duvidosa em {len(unsure)} opção(ões); mantendo por segurança",
+                    Action.NO_CHANGE, None, "decision.doubtful", {"count": len(unsure)}
                 )
-            return Decision(Action.NO_CHANGE, None, "nenhuma opção bate com as regras")
+            return Decision(Action.NO_CHANGE, None, "decision.no_match")
 
         # Meta cumprida ganha de degrau; depois prioridade, qualidade e valor.
         def score(item):
-            _idx, rule, parsed, goal, _why = item
+            _idx, rule, parsed, goal, _k, _p = item
             return (goal, rule.priority, parsed.quality or 0.0, parsed.value or 0.0)
 
-        idx, rule, parsed, goal, why = max(candidates, key=score)
+        idx, rule, parsed, goal, chave, args = max(candidates, key=score)
         action = Action.TAKE_OPTION_1 if idx == 0 else Action.TAKE_OPTION_2
-        return Decision(action, rule, why, goal_reached=goal)
+        return Decision(action, rule, chave, args, goal_reached=goal)
 
     # -- persistencia -----------------------------------------------------
     def to_json(self) -> dict:

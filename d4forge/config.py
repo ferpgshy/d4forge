@@ -76,8 +76,12 @@ class Settings:
     def to_json(self) -> dict:
         return asdict(self)
 
+    # `path=None` e nao `path=SETTINGS_PATH`: um default no cabecalho fixa o
+    # caminho na hora do import, e a partir dai nao ha' como redireciona-lo -
+    # nem nos testes, que acabavam lendo e sobrescrevendo os ajustes de verdade.
     @classmethod
-    def load(cls, path: Path = SETTINGS_PATH) -> "Settings":
+    def load(cls, path: Path | None = None) -> "Settings":
+        path = path or SETTINGS_PATH
         if not path.exists():
             return cls()
         try:
@@ -87,7 +91,8 @@ class Settings:
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in blob.items() if k in known})
 
-    def save(self, path: Path = SETTINGS_PATH) -> None:
+    def save(self, path: Path | None = None) -> None:
+        path = path or SETTINGS_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_json(), indent=2), encoding="utf-8")
 

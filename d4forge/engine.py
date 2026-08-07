@@ -70,9 +70,21 @@ class EventKind(Enum):
 
 @dataclass(frozen=True, slots=True)
 class EngineEvent:
+    """Chave de traducao + argumentos, nao texto pronto.
+
+    A interface guarda os eventos para reapresentar tudo quando o idioma muda;
+    com a frase ja' montada, o historico ficaria congelado na lingua antiga.
+    """
+
     kind: EventKind
-    message: str
+    key: str
     data: dict = field(default_factory=dict)
+
+    @property
+    def message(self) -> str:
+        from .i18n import t
+
+        return t(self.key, **self.data)
 
 
 Listener = Callable[[EngineEvent], None]
@@ -86,17 +98,28 @@ class Attempt:
     cost: int = 0
 
     def describe(self) -> str:
-        opts = " | ".join(o.describe() for o in self.options) or "(nada lido)"
-        return f"#{self.index}: {opts}  ->  {self.decision.reason}"
+        from .i18n import t
+
+        opts = " | ".join(o.describe() for o in self.options) or t("progress.none")
+        return t("eng.attempt", index=self.index, options=opts,
+                 reason=self.decision.reason)
 
 
 @dataclass
 class Outcome:
     found: bool
-    reason: str
+    # Chave de traducao do motivo; `reason` renderiza no idioma corrente.
+    reason_key: str
+    params: dict = field(default_factory=dict)
     attempts: list[Attempt] = field(default_factory=list)
     gold_spent: int = 0
     elapsed_s: float = 0.0
+
+    @property
+    def reason(self) -> str:
+        from .i18n import t
+
+        return t(self.reason_key, **self.params)
 
     @property
     def count(self) -> int:
@@ -147,19 +170,26 @@ class EnchantEngine:
     def cancel(self) -> None:
         self._cancel.set()
 
-    def _emit(self, kind: EventKind, message: str, **data) -> None:
-        log.debug("%s: %s", kind.value, message)
+    def _emit(self, kind: EventKind, key: str, **data) -> None:
+        evento = EngineEvent(kind, key, data)
+        log.debug("%s: %s", kind.value, evento.message)
         if self._listener is not None:
-            self._listener(EngineEvent(kind, message, data))
+            self._listener(evento)
 
     def _refresh_profile(self) -> ResolvedProfile:
         win = find_game_window()
         if win is None:
-            raise safety.StopReason("janela do Diablo IV não encontrada")
+            raise safety.StopReason("stop.no_window")
         if self._resolved is None or self._resolved.client != win.client:
             self._resolved = self.profile.scaled(win.client)
-            self._emit(EventKind.INFO, f"janela {win.client.w}x{win.client.h} em "
-                                       f"({win.client.x},{win.client.y})")
+            self._emit(EventKind.INFO, "eng.window", w=win.client.w, h=win.client.h,
+                       x=win.client.x, y=win.client.y, scale=self._resolved.scale)
+            # Fora de 16:9 a posicao horizontal das ROIs vem do modelo de
+            # ancoragem, nao de medicao numa tela dessa proporcao. Dizer isso e'
+            # mais util do que deixar o usuario descobrir por um clique perdido.
+            if self._resolved.widescreen:
+                self._emit(EventKind.INFO, "eng.widescreen",
+                           w=win.client.w, h=win.client.h)
         return self._resolved
 
     def _frame(self) -> tuple[np.ndarray, ResolvedProfile]:
@@ -167,12 +197,12 @@ class EnchantEngine:
         with self.profiler.measure("captura de tela"):
             frame = self.capture.grab(prof.client)
         if frame is None:
-            raise safety.StopReason("captura de tela falhou")
+            raise safety.StopReason("stop.capture_failed")
         return frame, prof
 
     def _sleep(self, seconds: float) -> None:
         if self._cancel.wait(seconds):
-            raise safety.StopReason("cancelado pelo usuário")
+            raise safety.StopReason("stop.cancelled")
 
     def _verify_parse(self, text: str) -> bool:
         return parse_affix(text, self.catalog).confident
@@ -225,12 +255,11 @@ class EnchantEngine:
             if i + 1 < attempts:
                 self._emit(
                     EventKind.INFO,
-                    f"a tela não mudou depois de {label}; clicando de novo",
+                    "eng.click_retry", label=label,
                 )
         self._dump_frame(f"clique_perdido_{label.replace(' ', '_').lower()}")
         raise safety.StopReason(
-            f"cliquei em {label} {attempts}x e a tela continuou em "
-            f"'{state.value}'. Confira a calibração ou se o jogo travou."
+            "stop.click_lost", label=label, attempts=attempts, state=state.value
         )
 
     def _wait_until_leaves(self, previous: ScreenState, what: str, fatal: bool = True):
@@ -245,7 +274,7 @@ class EnchantEngine:
         deadline = started + self.state_timeout
         while time.monotonic() < deadline:
             if self._cancel.is_set():
-                raise safety.StopReason("cancelado pelo usuário")
+                raise safety.StopReason("stop.cancelled")
             self.guard.check()
             frame, prof, state = self._observe()
             if state is not previous and state is not ScreenState.UNKNOWN:
@@ -255,7 +284,7 @@ class EnchantEngine:
                     f"reação: {previous.value} → {state.value}",
                     (time.monotonic() - started) * 1000,
                 )
-                self._emit(EventKind.STATE, f"tela: {state.value}")
+                self._emit(EventKind.STATE, "eng.screen", state=state.value)
                 return frame, prof, state
             self._sleep(self.poll_interval)
 
@@ -265,7 +294,7 @@ class EnchantEngine:
             # o bot faria em cada uma.
             self._emit(
                 EventKind.INFO,
-                "[simulado] a tela não muda sozinha — avance no jogo para continuar",
+                "eng.sim_manual",
             )
             return None
 
@@ -276,8 +305,8 @@ class EnchantEngine:
         # tela nao mudou e nao sobrava nada para conferir depois.
         self._dump_frame(f"tela_travada_em_{previous.value}")
         raise safety.StopReason(
-            f"depois de {what}, a tela continuou em '{previous.value}' por "
-            f"{self.state_timeout:g}s. O clique pode ter errado o alvo."
+            "stop.screen_stuck", what=what, state=previous.value,
+            seconds=self.state_timeout,
         )
 
     def _dump_frame(self, tag: str) -> None:
@@ -294,7 +323,7 @@ class EnchantEngine:
             stamp = time.strftime("%H%M%S")
             path = CAPTURES_DIR / f"debug_{tag}_{stamp}.png"
             if imwrite(path, frame):
-                self._emit(EventKind.INFO, f"quadro salvo em captures/{path.name}")
+                self._emit(EventKind.INFO, "eng.frame_saved", name=path.name)
         except Exception as exc:  # noqa: BLE001 - diagnostico nunca pode derrubar o bot
             log.debug("falha ao salvar quadro de diagnostico: %s", exc)
 
@@ -318,12 +347,12 @@ class EnchantEngine:
     # -- acoes ------------------------------------------------------------
     def _click(self, rect, label: str, park: bool = True) -> None:
         if self.dry_run:
-            self._emit(EventKind.CLICK, f"[simulado] clicaria em {label} {rect.as_tuple()}")
+            self._emit(EventKind.CLICK, "eng.click_sim", label=label)
             return
         with self.profiler.measure(f"clique: {label}"):
             where = click_rect(rect, self.input_profile)
         self.guard.note_click(where)
-        self._emit(EventKind.CLICK, f"clique em {label} ({where.x},{where.y})")
+        self._emit(EventKind.CLICK, "eng.click", label=label, x=where.x, y=where.y)
         if park:
             self._park_cursor(where)
 
@@ -376,7 +405,7 @@ class EnchantEngine:
         if self.guard.limits.max_gold is None:
             return 0
         with self.profiler.measure("ler custo (OCR)"):
-            result = self.ocr.read(prof.enchant_cost.crop(frame))
+            result = self.ocr.read(prof.enchant_cost.crop(frame), ui_scale=prof.scale)
         digits = "".join(c for c in result.text if c.isdigit())
         return int(digits) if digits else 0
 
@@ -389,11 +418,11 @@ class EnchantEngine:
         """
         roi = prof.locked_affix if locked else prof.replace_current
         with self.profiler.measure("ler afixo (OCR)"):
-            res = self.ocr.read(roi.crop(frame), self._verify_parse)
+            res = self.ocr.read(roi.crop(frame), self._verify_parse, ui_scale=prof.scale)
         parsed = parse_affix(res.text, self.catalog)
         if not parsed.confident:
             return None
-        self._emit(EventKind.READ, f"atual: {parsed.describe()}", raw=res.text)
+        self._emit(EventKind.READ, "eng.current", affix=parsed.describe(), raw=res.text)
         return parsed
 
     def _read_options(self, frame, prof) -> list[ParsedAffix]:
@@ -401,7 +430,7 @@ class EnchantEngine:
         self._read_seq += 1
         for i, roi in enumerate(prof.replace_options, 1):
             with self.profiler.measure("ler afixo (OCR)"):
-                res = self.ocr.read(roi.crop(frame), self._verify_parse)
+                res = self.ocr.read(roi.crop(frame), self._verify_parse, ui_scale=prof.scale)
             # Separar o tempo dentro do modelo do resto revela se a lentidao e'
             # do OCR ou de disputa de CPU com o jogo.
             self.profiler.record("  ├ modelo", res.backend_ms)
@@ -418,7 +447,8 @@ class EnchantEngine:
             flag = "" if parsed.confident else "  (duvidoso)"
             self._emit(
                 EventKind.READ,
-                f"opção {i}: {shown}{flag}{extra}",
+                "eng.option" if parsed.confident else "eng.option_doubt",
+                index=i, affix=shown,
                 raw=res.text, source=res.source, ms=res.elapsed_ms,
                 name=parsed.name, known=parsed.entry is not None,
             )
@@ -456,7 +486,7 @@ class EnchantEngine:
             if removed:
                 self._emit(
                     EventKind.INFO,
-                    f"captures/ esvaziada ({removed} arquivo(s) da sessão anterior)",
+                    "eng.captures_cleared", count=removed,
                 )
         except Exception as exc:  # noqa: BLE001 - limpeza nunca derruba o ciclo
             log.debug("falha ao limpar captures: %s", exc)
@@ -480,7 +510,7 @@ class EnchantEngine:
         """Marca a opcao escolhida e confere que ela realmente acendeu."""
         if decision.action is Action.NO_CHANGE:
             # No Change ja' vem marcado por padrao; nao mexemos em nada.
-            self._emit(EventKind.DECISION, f"mantendo: {decision.reason}")
+            self._emit(EventKind.DECISION, "eng.keeping", reason=decision.reason)
             return True
 
         index = decision.action.orb_index
@@ -497,13 +527,13 @@ class EnchantEngine:
         # "+400 Resistance to All Elements" abortou dizendo que a tela mostrava
         # o No Change.
         if self._confirm_selection(index):
-            self._emit(EventKind.DECISION, f"opção {index + 1} confirmada na tela")
+            self._emit(EventKind.DECISION, "eng.option_confirmed", index=index + 1)
             return True
 
         self._dump_frame(f"selecao_nao_confirmada_op{index + 1}")
         self._emit(
             EventKind.ERROR,
-            f"marquei a opção {index + 1} mas a tela não confirmou; abortando",
+            "eng.option_unconfirmed", index=index + 1,
         )
         return False
 
@@ -517,29 +547,43 @@ class EnchantEngine:
                 return True
             seen.append("nenhuma" if marked is None else f"op{marked + 1}")
             self._sleep(0.1)
-        self._emit(EventKind.INFO, f"orbe lido nas amostras: {', '.join(seen)}")
+        self._emit(EventKind.INFO, "eng.orb_samples", samples=", ".join(seen))
         return False
 
-    def _countdown(self) -> None:
-        """Espera antes de comecar, para dar tempo de voltar o foco ao jogo.
+    # Tempo para o jogo terminar de vir para frente depois de um foco
+    # confirmado. Medido: a janela responde em ~120 ms; 0,4 s cobre com folga.
+    FOCUS_SETTLE_S = 0.4
 
-        Sem isso o guard aborta imediatamente: quem esta' em primeiro plano
-        quando voce aperta Iniciar e' a janela do proprio app, nao o Diablo IV.
+    def _countdown(self) -> None:
+        """Traz o jogo para frente e espera o necessario - nao mais que isso.
+
+        Quem esta' em primeiro plano quando voce aperta Iniciar e' a janela do
+        proprio app, nao o Diablo IV; sem foco o guard aborta na hora. A espera
+        existe para voce ter tempo de voltar ao jogo na mao.
+
+        Mas se o foco automatico funcionou - e agora `focus()` CONFIRMA que
+        funcionou, em vez de supor - nao ha' nada para esperar, e a contagem
+        inteira vira atraso a' toa. Ela so' e' cumprida quando o Windows recusa
+        o foco, que e' justamente o caso em que voce precisa do Alt+Tab.
         """
         win = find_game_window()
         if win is None:
-            raise safety.StopReason("janela do Diablo IV não encontrada")
+            raise safety.StopReason("stop.no_window")
 
-        if self.focus_game_on_start and not win.is_foreground:
+        focado = win.is_foreground
+        if self.focus_game_on_start and not focado:
             try:
-                win.focus()
-                self._emit(EventKind.INFO, "trazendo o Diablo IV para frente")
+                focado = win.focus()
             except Exception:  # noqa: BLE001 - o Windows pode recusar o foco
-                self._emit(EventKind.INFO, "não consegui focar o jogo; troque com Alt+Tab")
+                focado = False
+            self._emit(
+                EventKind.INFO, "eng.focusing" if focado else "eng.focus_failed"
+            )
 
-        remaining = self.start_delay
+        remaining = self.FOCUS_SETTLE_S if focado else self.start_delay
         while remaining > 0:
-            self._emit(EventKind.INFO, f"começando em {remaining:.0f}s… deixe o jogo em foco")
+            if not focado:
+                self._emit(EventKind.INFO, "eng.countdown", seconds=remaining)
             step = min(1.0, remaining)
             self._sleep(step)
             remaining -= step
@@ -553,10 +597,7 @@ class EnchantEngine:
         # deixar o guard abortar com uma mensagem genérica.
         win = find_game_window()
         if self.guard.require_foreground and (win is None or not win.is_foreground):
-            raise safety.StopReason(
-                "o Diablo IV não está em primeiro plano. Use Alt+Tab para voltar "
-                "ao jogo e aperte F9, ou aumente o tempo de espera nas Travas."
-            )
+            raise safety.StopReason("stop.not_foreground")
 
     # -- ciclo principal --------------------------------------------------
     def run(self) -> Outcome:
@@ -565,9 +606,9 @@ class EnchantEngine:
         self._cancel.clear()
 
         if self.dry_run:
-            self._emit(EventKind.INFO, "MODO SIMULAÇÃO: lê a tela mas não clica")
-        self._emit(EventKind.INFO, f"limites: {self.guard.limits.describe()}")
-        self._emit(EventKind.INFO, f"regras: {len(self.ruleset.active)} ativa(s)")
+            self._emit(EventKind.INFO, "eng.sim_manual")
+        self._emit(EventKind.INFO, "eng.limits", limits=self.guard.limits.describe())
+        self._emit(EventKind.INFO, "eng.rules", count=len(self.ruleset.active))
 
         # Despachante: age pelo que ESTA' na tela, nao por uma ordem fixa.
         # O jogo pula o dialogo de confirmacao dependendo do item/estado, entao
@@ -583,7 +624,7 @@ class EnchantEngine:
 
         try:
             if not self.dry_run and safety.set_high_priority(True):
-                self._emit(EventKind.INFO, "prioridade do processo elevada")
+                self._emit(EventKind.INFO, "eng.priority")
             self._countdown()
             self.guard.started_at = time.monotonic()
 
@@ -594,10 +635,7 @@ class EnchantEngine:
                 if state is ScreenState.UNKNOWN:
                     if time.monotonic() - idle_since > self.state_timeout:
                         self._dump_frame("tela_desconhecida")
-                        raise safety.StopReason(
-                            "não reconheço a tela atual. Abra o Occultist na aba "
-                            "de encantamento e tente de novo."
-                        )
+                        raise safety.StopReason("stop.unknown_screen")
                     self._sleep(self.poll_interval)
                     continue
                 idle_since = time.monotonic()
@@ -614,10 +652,10 @@ class EnchantEngine:
                     if found is not None:
                         self._emit(
                             EventKind.SUCCESS,
-                            f"afixo encontrado em {len(attempts)} tentativa(s): {found.reason}",
+                            "eng.found", count=len(attempts), reason=found.reason,
                         )
                         return Outcome(
-                            True, found.reason, attempts,
+                            True, found.key, dict(found.params), attempts,
                             self.guard.gold_spent, time.monotonic() - started,
                         )
                     if state is ScreenState.ENCHANT_LOCKED:
@@ -627,14 +665,17 @@ class EnchantEngine:
                         held = self._read_current(frame, prof, locked=True)
                         rule = self.ruleset.first_match(held) if held else None
                         if rule is not None:
-                            reason = (
-                                f"o item já tem {held.describe()}, que atende "
-                                f"'{rule.describe()}'"
-                            )
-                            self._emit(EventKind.SUCCESS, reason)
+                            from .i18n import t
+
+                            self._emit(EventKind.SUCCESS, "eng.already_ok",
+                                       affix=held.describe(), rule=rule.describe())
+                            reason = t("eng.already_ok", affix=held.describe(),
+                                       rule=rule.describe())
                             return Outcome(
-                                True, reason, attempts,
-                                self.guard.gold_spent, time.monotonic() - started,
+                                True, "eng.already_ok",
+                                {"affix": held.describe(), "rule": rule.describe()},
+                                attempts, self.guard.gold_spent,
+                                time.monotonic() - started,
                             )
                     if state is ScreenState.ENCHANT_SELECT and selected_orb(
                         frame, prof.affix_orbs
@@ -643,10 +684,7 @@ class EnchantEngine:
                             continue  # era um quadro de transicao, ignora
                         if not attempts:
                             self._dump_frame("sem_selecao")
-                            raise safety.StopReason(
-                                "nenhum afixo está marcado. Escolha na tela do jogo "
-                                "qual afixo trocar antes de iniciar."
-                            )
+                            raise safety.StopReason("stop.no_selection")
                         # Ja' encantamos antes, entao havia afixo selecionado e o
                         # jogo mantem a escolha durante todo o processo. Nao
                         # reconhecer o orbe aqui e' mais provavel de ser falha de
@@ -656,8 +694,7 @@ class EnchantEngine:
                         self._dump_frame("orbe_nao_lido")
                         self._emit(
                             EventKind.INFO,
-                            "não identifiquei o orbe do afixo marcado; seguindo "
-                            "assim mesmo (já houve tentativa bem-sucedida antes)",
+                            "eng.orb_unread",
                         )
                     last_cost = self._read_cost(frame, prof)
                     self._act(prof.enchant_button, "Enchant", state)
@@ -680,14 +717,22 @@ class EnchantEngine:
                     self._emit(EventKind.DECISION, decision.reason)
 
                     if not self._apply_decision(decision, prof):
-                        raise safety.StopReason("não consegui confirmar a opção marcada")
+                        raise safety.StopReason("stop.unconfirmed")
 
                     self._click(prof.replace_button, "Replace Affix")
 
                     attempt = Attempt(len(attempts) + 1, options, decision, last_cost)
                     attempts.append(attempt)
                     self.guard.note_attempt(last_cost)
-                    self._emit(EventKind.ATTEMPT, attempt.describe(), index=attempt.index)
+                    # A tentativa vai inteira no evento: a interface monta a
+                    # tabela do histórico a partir daqui, não de texto.
+                    self._emit(
+                        EventKind.ATTEMPT, "eng.attempt",
+                        index=attempt.index,
+                        options=" | ".join(o.describe() for o in options),
+                        reason=decision.reason,
+                        attempt=attempt,
+                    )
 
                     # Um degrau de escalada e' aceito mas nao encerra a sessao:
                     # so' a meta da regra termina.
@@ -709,16 +754,17 @@ class EnchantEngine:
                     continue
 
         except safety.StopReason as stop:
-            self._emit(EventKind.STOPPED, str(stop))
+            self._emit(EventKind.STOPPED, stop.key, **stop.params)
             return Outcome(
-                False, str(stop), attempts, self.guard.gold_spent, time.monotonic() - started
+                False, stop.key, dict(stop.params), attempts,
+                self.guard.gold_spent, time.monotonic() - started,
             )
         except Exception as exc:  # noqa: BLE001 - a GUI precisa ver qualquer falha
             log.exception("engine quebrou")
-            self._emit(EventKind.ERROR, f"erro inesperado: {exc}")
+            self._emit(EventKind.ERROR, "eng.error", error=str(exc))
             return Outcome(
-                False, f"erro: {exc}", attempts, self.guard.gold_spent,
-                time.monotonic() - started,
+                False, "eng.error", {"error": str(exc)}, attempts,
+                self.guard.gold_spent, time.monotonic() - started,
             )
         finally:
             safety.set_high_priority(False)

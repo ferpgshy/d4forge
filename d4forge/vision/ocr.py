@@ -429,8 +429,22 @@ class OcrEngine:
         self._dirty = False
 
     # -- leitura ----------------------------------------------------------
-    def read(self, bgr: np.ndarray, verify: Verifier | None = None) -> OcrResult:
-        """Le uma ROI que contem uma linha de texto."""
+    def read(
+        self,
+        bgr: np.ndarray,
+        verify: Verifier | None = None,
+        ui_scale: float = 1.0,
+    ) -> OcrResult:
+        """Le uma ROI que contem uma linha de texto.
+
+        `ui_scale` e' o quanto a tela do jogo e' maior que a de referencia
+        (1.0 em 1080p, 1.33 em 1440p, 2.0 em 4K). Serve para UMA coisa so':
+        converter a largura da tinta para pixels de referencia antes da checagem
+        de densidade. A escada de render nao muda com a resolucao - medido, o
+        detector ja' limita a imagem a 1280 px de lado, entao ler a mesma linha
+        custa 22-32 ms em 1080p, 1440p ou 4K indistintamente, e reduzir a
+        ampliacao so' fazia "15.0%" sair como "1 5.0%".
+        """
         t0 = time.perf_counter()
 
         def done(
@@ -470,9 +484,13 @@ class OcrEngine:
         best_key: tuple = ()
         accepted = False
         attempts = 0
+        # A densidade de tinta por caractere foi medida em pixels da tela de
+        # referencia; numa tela maior a mesma frase tem mais pixels sem ter mais
+        # letras, e sem esta conversao `density_ok` reprovaria toda leitura.
+        ink_width = int(round(width / ui_scale)) if ui_scale > 1.02 else width
         for spec in RENDER_LADDER:
             reading = self.backend.read(
-                render_for_ocr(mask, spec), spec.span(width), width
+                render_for_ocr(mask, spec), spec.span(width), ink_width
             )
             attempts += 1
             text = normalize_text(reading.text)

@@ -20,3 +20,11 @@ dist/
 # capturas originais do jogo: mostram conta, personagem e ouro.
 # As telas de teste higienizadas vivem em tests/fixtures/telas/
 PRINTS*/
+ESTRATEGIA/
+
+# funcionalidade ainda nao construida: a especificacao entra no repositorio
+# quando o codigo dela entrar junto
+Funcionalidade Auto Talisman/
+
+# configuracao local do editor
+.vscode/

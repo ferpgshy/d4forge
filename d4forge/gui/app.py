@@ -48,9 +48,11 @@ from ..vision.ocr import OcrEngine
 from . import style
 from .frameless import FramelessMixin, TitleBarArea
 from .progress import ProgressPanel
-from .worker import EngineWorker, WarmupWorker
+from .temper_tab import TemperTab
+from .worker import EngineWorker, TemperWorker, WarmupWorker
 
 VK_F9 = 0x78
+VK_F10 = 0x79
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +164,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         super().__init__()
         self.app = app_state
         self.engine_worker: EngineWorker | None = None
+        self.temper_worker: TemperWorker | None = None
         self._unknown: dict[str, int] = {}
         self._catalog_carregado = False
 
@@ -194,6 +197,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_panel(), t("tab.panel"))
         self.tabs.addTab(self._build_target(), t("tab.target"))
+        self.tabs.addTab(self._build_temper(), t("tab.temper"))
         self.tabs.addTab(self._build_catalog(), t("tab.catalog"))
         # A tabela do catálogo tem ~880 linhas: montá-la só quando alguém abre a
         # aba tira quase um segundo da abertura e da troca de idioma.
@@ -214,6 +218,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._hotkeys.timeout.connect(self._poll_hotkeys)
         self._hotkeys.start(80)
         key_pressed_once(VK_F9)
+        key_pressed_once(VK_F10)
         key_pressed_once(VK_F12)
 
         # Carrega o leitor agora, para o custo de partida não cair sobre a
@@ -323,6 +328,7 @@ class MainWindow(FramelessMixin, QMainWindow):
                 self.tabs.removeTab(0)
             self.tabs.addTab(self._build_panel(), t("tab.panel"))
             self.tabs.addTab(self._build_target(), t("tab.target"))
+            self.tabs.addTab(self._build_temper(), t("tab.temper"))
             # A aba do catálogo é a MESMA de antes, só com os rótulos trocados:
             # o conteúdo dela não depende de idioma.
             self._retranslate_catalog()
@@ -765,10 +771,16 @@ class MainWindow(FramelessMixin, QMainWindow):
     # ------------------------------------------------------ atalho global
     def _poll_hotkeys(self) -> None:
         rodando = bool(self.engine_worker and self.engine_worker.isRunning())
+        temperando = bool(self.temper_worker and self.temper_worker.isRunning())
         if key_pressed_once(VK_F9):
             self._stop() if rodando else self._start()
-        elif key_pressed_once(VK_F12) and rodando:
-            self._stop()
+        elif key_pressed_once(VK_F10):
+            self._stop_temper() if temperando else self._start_temper()
+        elif key_pressed_once(VK_F12):
+            if rodando:
+                self._stop()
+            if temperando:
+                self._stop_temper()
 
     # ---------------------------------------------------------- ciclo/vida
     def _collect_settings(self) -> None:
@@ -836,6 +848,85 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.engine_worker.stop()
             self.btn_stop.setEnabled(False)
             self._set_status("stopping")
+
+    # ------------------------------------------------------------ tempering
+    def _build_temper(self) -> QWidget:
+        # Um só painel para a vida toda da janela, como o do encantamento:
+        # trocar de idioma recria as abas e um painel novo perderia a sessão.
+        if not hasattr(self, "temper_tab"):
+            self.temper_tab = TemperTab(self.app.settings)
+            self.temper_tab.load(config.load_temper_goal())
+
+            botoes = QHBoxLayout()
+            self.btn_temper = QPushButton(f"{t('temper.start')}   ·   F10")
+            self.btn_temper.setObjectName("start")
+            self.btn_temper.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_temper.clicked.connect(self._start_temper)
+            self.btn_temper_stop = QPushButton(f"{t('panel.stop')}   ·   F12")
+            self.btn_temper_stop.setObjectName("stop")
+            self.btn_temper_stop.setEnabled(False)
+            self.btn_temper_stop.clicked.connect(self._stop_temper)
+            botoes.addWidget(self.btn_temper, 2)
+            botoes.addWidget(self.btn_temper_stop, 1)
+            self.temper_tab.layout().insertLayout(1, botoes)
+        return self.temper_tab
+
+    def _start_temper(self) -> None:
+        if self.temper_worker and self.temper_worker.isRunning():
+            return
+        goal = self.temper_tab.goal()
+        config.save_temper_goal(goal)
+        s = self.app.settings
+
+        from ..temper.engine import TemperEngine
+        from ..temper.rules import TemperLimits
+
+        engine = TemperEngine(
+            goal=goal,
+            ocr=self.app.ocr,
+            limits=TemperLimits(
+                max_attempts=s.max_attempts, max_minutes=s.max_minutes
+            ),
+            profiler=self.app.profiler,
+            input_profile=PROFILES.get(s.input_speed, DEFAULT_INPUT),
+            require_foreground=s.require_foreground,
+        )
+
+        self.temper_tab.progress.reset()
+        self.temper_tab.set_status(t("temper.running"))
+        self.temper_worker = TemperWorker(engine)
+        self.temper_worker.event.connect(self._on_temper_event)
+        self.temper_worker.finished_run.connect(self._on_temper_finished)
+        self.temper_worker.start()
+
+    def _on_temper_event(self, evt) -> None:
+        self.temper_tab.progress.push(evt)
+        # O que o ciclo está fazendo agora, em cima da tabela: sem isto, uma
+        # sessão que para antes da primeira tentativa não deixa nada visível.
+        if evt.kind in (EventKind.STATE, EventKind.INFO):
+            self.temper_tab.set_status(evt.message)
+
+        self.btn_temper.setEnabled(False)
+        self.btn_temper_stop.setEnabled(True)
+
+    def _stop_temper(self) -> None:
+        if self.temper_worker:
+            self.temper_worker.stop()
+            self.btn_temper_stop.setEnabled(False)
+
+    def _on_temper_finished(self, outcome) -> None:
+        self.btn_temper.setEnabled(True)
+        self.btn_temper_stop.setEnabled(False)
+        self.temper_tab.progress.finish(outcome)
+        self.temper_tab.progress.note(
+            "temper.done", count=outcome.count, seconds=outcome.elapsed_s
+        )
+        self.temper_tab.progress.note(outcome.reason_key, **outcome.params)
+        # O motivo em destaque, não só dentro dos detalhes técnicos: quando o
+        # ciclo para sem nenhuma tentativa, esta linha é a única coisa que
+        # distingue "falhou" de "não fez nada".
+        self.temper_tab.set_status(outcome.reason, erro=not outcome.found)
+        self.app.save()
 
     def _on_event(self, evt: EngineEvent) -> None:
         self.progress.push(evt)

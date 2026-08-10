@@ -18,6 +18,13 @@ from .sendinput import cursor_position
 
 user32 = ctypes.WinDLL("user32")
 
+# GetAsyncKeyState devolve SHORT. Sem declarar, o ctypes le' o retorno como int
+# de 32 bits e os bits acima do 15 ficam com lixo do registrador. Os bits que
+# usamos (0 e 15) continuam certos, mas ja' perdemos tempo duas vezes neste
+# projeto com handle truncado por falta de declaracao - nao vale repetir.
+user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+user32.GetAsyncKeyState.restype = ctypes.c_short
+
 VK_F12 = 0x7B
 VK_ESCAPE = 0x1B
 

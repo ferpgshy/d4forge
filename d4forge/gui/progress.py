@@ -99,7 +99,7 @@ class ProgressPanel(QGroupBox):
             linha.addWidget(m, 2 if nome == "current" else 1)
         raiz.addLayout(linha)
 
-        self.tabela = QTableWidget(0, 4)
+        self.tabela = QTableWidget(0, len(self.COLUNAS))
         self.tabela.setObjectName("attempts")
         self.tabela.verticalHeader().setVisible(False)
         self.tabela.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -114,10 +114,15 @@ class ProgressPanel(QGroupBox):
         # de largura limitada - "#" e o veredito -, entao olhar as primeiras
         # linhas basta e o custo para de crescer.
         cab.setResizeContentsPrecision(20)
-        cab.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        cab.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        cab.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        cab.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        # Primeira ("#") e última (veredito) têm conteúdo de largura limitada;
+        # as do meio, que carregam o texto do afixo, dividem o que sobra.
+        ultima = len(self.COLUNAS) - 1
+        for coluna in range(len(self.COLUNAS)):
+            modo = (
+                QHeaderView.ResizeMode.ResizeToContents
+                if coluna in (0, ultima) else QHeaderView.ResizeMode.Stretch
+            )
+            cab.setSectionResizeMode(coluna, modo)
         # Sem um mínimo, abrir os detalhes espremia a tabela até sobrar só o
         # cabeçalho — o painel perdia justamente o que veio mostrar.
         self.tabela.setMinimumHeight(130)
@@ -171,7 +176,7 @@ class ProgressPanel(QGroupBox):
         self._events.append(evt)
         if evt.kind is EventKind.ATTEMPT:
             tentativa = evt.data.get("attempt")
-            if isinstance(tentativa, Attempt):
+            if tentativa is not None:
                 self._attempts.append(tentativa)
                 self._add_row(tentativa)
         elif evt.kind is EventKind.READ and evt.data.get("affix"):
@@ -193,34 +198,54 @@ class ProgressPanel(QGroupBox):
         self._redraw()
 
     # -------------------------------------------------------------- tabela
-    def _add_row(self, tentativa: Attempt) -> None:
-        """Tentativa nova entra no topo: e' a que o usuario quer ver."""
-        self.tabela.insertRow(0)
+    #
+    # O que muda entre o encantamento e o tempering e' SO' a linha da tabela: as
+    # metricas, o relogio, os detalhes tecnicos e a troca de idioma sao os
+    # mesmos. Por isso o painel expoe tres ganchos e a subclasse do tempering
+    # sobrescreve apenas eles, em vez de duplicar a tela inteira.
+    COLUNAS = ("progress.col_n", "progress.col_opt1",
+               "progress.col_opt2", "progress.col_result")
+
+    def _celulas(self, tentativa) -> list[str]:
         opcoes = [o.describe() for o in tentativa.options]
-        celulas = [
+        return [
             str(tentativa.index),
             opcoes[0] if len(opcoes) > 0 else t("progress.none"),
             opcoes[1] if len(opcoes) > 1 else t("progress.none"),
             self._resultado(tentativa),
         ]
+
+    def _destaques(self, tentativa) -> tuple[int, ...]:
+        """Colunas em dourado: a opcao levada e o veredito.
+
+        O resto fica em cinza para o olho achar a rodada que mudou algo.
+        """
+        if not tentativa.decision.accepted:
+            return ()
+        return (tentativa.decision.action.orb_index + 1, 3)
+
+    def _dica(self, tentativa) -> str:
+        return tentativa.decision.reason
+
+    def _add_row(self, tentativa) -> None:
+        """Tentativa nova entra no topo: e' a que o usuario quer ver."""
+        self.tabela.insertRow(0)
+        celulas = self._celulas(tentativa)
+        dica = self._dica(tentativa)
         for coluna, texto in enumerate(celulas):
             item = QTableWidgetItem(texto)
-            item.setToolTip(tentativa.decision.reason or texto)
+            item.setToolTip(dica or texto)
             if coluna == 0:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tabela.setItem(0, coluna, item)
 
-        escolhida = tentativa.decision.action.orb_index
-        if tentativa.decision.accepted:
-            # Destaca a opcao levada e o veredito; o resto fica em cinza para
-            # que o olho ache a rodada que mudou alguma coisa.
-            for coluna in (escolhida + 1, 3):
-                celula = self.tabela.item(0, coluna)
-                if celula is not None:
-                    celula.setForeground(QColor(style.DOURADO))
+        for coluna in self._destaques(tentativa):
+            celula = self.tabela.item(0, coluna)
+            if celula is not None:
+                celula.setForeground(QColor(style.DOURADO))
         self.tabela.scrollToTop()
 
-    def _resultado(self, tentativa: Attempt) -> str:
+    def _resultado(self, tentativa) -> str:
         d = tentativa.decision
         if d.goal_reached:
             return t("progress.goal")
@@ -265,19 +290,17 @@ class ProgressPanel(QGroupBox):
         self.setTitle(t("progress.title"))
         for m in self._metricas.values():
             m.retranslate()
-        self.tabela.setHorizontalHeaderLabels([
-            t("progress.col_n"), t("progress.col_opt1"),
-            t("progress.col_opt2"), t("progress.col_result"),
-        ])
+        self.tabela.setHorizontalHeaderLabels([t(c) for c in self.COLUNAS])
         self.vazio.setText(t("progress.empty"))
         self.btn_detalhes.setText(t("progress.details"))
 
-        # A coluna "Resultado" e' a unica traduzida na tabela; as outras sao
-        # texto do jogo e nao mudam.
+        # A ultima coluna e' a unica traduzida na tabela; as outras sao texto do
+        # jogo e nao mudam de idioma.
+        ultima = len(self.COLUNAS) - 1
         for linha, tentativa in enumerate(reversed(self._attempts)):
-            celula = self.tabela.item(linha, 3)
+            celula = self.tabela.item(linha, ultima)
             if celula is not None:
-                celula.setText(self._resultado(tentativa))
+                celula.setText(self._celulas(tentativa)[ultima])
 
         self.detalhes.clear()
         for evt in self._events:

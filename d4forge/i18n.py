@@ -190,6 +190,88 @@ STRINGS: dict[str, dict[str, str]] = {
         "decision.climb_first": "opção {index} — troca '{held}' pelo alvo",
         "decision.climb_up": "opção {index} — sobe de {current:g} para {value:g}",
         # -- painel de progresso
+        "temper.goal": "meta: {goal}",
+        "temper.goal_ga": "Greater Affix",
+        "temper.goal_fraction": "{pct:.0f}% do intervalo",
+        "temper.goal_value": "valor >= {value:g}",
+        "temper.goal_any": "qualquer resultado",
+        "temper.attempt": "#{index}: {affix}  →  {reason}",
+        "temper.got_ga": "Greater Affix: {value:g}",
+        "temper.got_value": "{value:g} atende o valor pedido",
+        "temper.got_fraction": "{value:g} — {pct:.0f}% do intervalo",
+        "temper.got_any": "{value:g}",
+        "temper.keep_rolling": "{affix} — continua",
+        "temper.other_affix": "não é o afixo pedido ('{want}')",
+        "temper.unreadable": "leitura duvidosa",
+        "temper.recharged": "recarreguei os rerolls ({count}x)",
+        "temper.unknown_screen": "não reconheço a tela. Abra o Ferreiro na aba Tempering.",
+        "temper.recipes_open": (
+            "a lista de receitas está aberta. Escolha a receita e faça o "
+            "primeiro Temper na mão; depois disso eu repito o ciclo."
+        ),
+        "temper.no_recipe": (
+            "nenhuma receita escolhida neste item. Escolha a categoria e a "
+            "receita no jogo antes de iniciar."
+        ),
+        "temper.out_of_rerolls": (
+            "os Temper Rerolls acabaram. Recarregar consome Pergaminhos — ligue "
+            "a recarga automática se quiser que eu faça isso."
+        ),
+        "temper.no_scrolls": (
+            "os Temper Rerolls acabaram e não dá para recarregar: ou o item "
+            "está no limite, ou os Pergaminhos acabaram."
+        ),
+        "temper.recharge_limit": "cheguei ao teto de {count} recarga(s) da sessão",
+        "temper.recharge_runaway": (
+            "cliquei em recarregar {count}x e o item não encheu. Parei para não "
+            "continuar gastando Pergaminhos: confira se o botão de recarga está "
+            "no lugar certo na tela."
+        ),
+        "temper.unreadable_stop": (
+            "não consegui ler o resultado ({raw!r}) e não vou rolar por cima "
+            "dele. Confira o item no jogo."
+        ),
+        "tab.temper": "Tempering",
+        "temper.col_affix": "Afixo sorteado",
+        "temper.col_done": "parou aqui",
+        "temper.col_ga": "GA",
+        "temper.col_rolled": "rolou",
+        "temper.hint": (
+            "Abra o Ferreiro na aba Tempering, escolha a categoria e a receita, "
+            "e faça o primeiro Temper na mão. Depois disso aperte F10."
+        ),
+        "temper.goal_box": "Parar quando",
+        "temper.mode_ga": "sair um Greater Affix",
+        "temper.mode_ga_tip": (
+            "No GA o jogo mostra só o valor, sem o intervalo entre colchetes. "
+            "É por isso que dá para reconhecê-lo sem cadastrar faixa nenhuma."
+        ),
+        "temper.mode_fraction": "o roll chegar a",
+        "temper.mode_fraction_suffix": "% do intervalo",
+        "temper.mode_value": "o valor chegar a",
+        "temper.affix_filter": "e o afixo contiver",
+        "temper.affix_filter_ph": "deixe vazio para aceitar qualquer afixo",
+        "temper.affix_filter_tip": (
+            "Algumas receitas sorteiam entre vários afixos. Sem isto, o ciclo "
+            "pararia num GA do afixo errado."
+        ),
+        "temper.rerolls_box": "Quando os Temper Rerolls acabarem",
+        "temper.recharge_stop": "parar e me avisar",
+        "temper.recharge_one": "recarregar 1 por vez",
+        "temper.recharge_full": "encher até o máximo do item",
+        "temper.recharge_cap": "no máximo",
+        "temper.recharge_no_cap": "sem limite",
+        "temper.recharge_cap_suffix": " recarga(s) nesta sessão",
+        "temper.recharge_warn": (
+            "Recarregar consome Pergaminhos. Cada item tem seu próprio limite "
+            "de Temper Rerolls, e o botão circular fica cinza ao chegar nele — "
+            "ou quando os Pergaminhos acabam."
+        ),
+        "temper.start": "Iniciar Tempering",
+        "temper.hotkey_hint": "F10 inicia e para; F12 só para.",
+        "temper.done": "{count} tentativa(s) em {seconds:.0f}s",
+        "temper.idle": "Pronto. Abra o Ferreiro no Tempering e aperte F10.",
+        "temper.running": "Rodando…",
         "progress.title": "Progresso",
         "progress.attempts": "Tentativas",
         "progress.elapsed": "Tempo",
@@ -367,6 +449,88 @@ STRINGS: dict[str, dict[str, str]] = {
         "decision.goal": "option {index} satisfies '{rule}'",
         "decision.climb_first": "option {index} — swaps '{held}' for the target",
         "decision.climb_up": "option {index} — climbs from {current:g} to {value:g}",
+        "temper.goal": "goal: {goal}",
+        "temper.goal_ga": "Greater Affix",
+        "temper.goal_fraction": "{pct:.0f}% of the range",
+        "temper.goal_value": "value >= {value:g}",
+        "temper.goal_any": "any result",
+        "temper.attempt": "#{index}: {affix}  →  {reason}",
+        "temper.got_ga": "Greater Affix: {value:g}",
+        "temper.got_value": "{value:g} meets the requested value",
+        "temper.got_fraction": "{value:g} — {pct:.0f}% of the range",
+        "temper.got_any": "{value:g}",
+        "temper.keep_rolling": "{affix} — keep going",
+        "temper.other_affix": "not the requested affix ('{want}')",
+        "temper.unreadable": "doubtful reading",
+        "temper.recharged": "recharged the rerolls ({count}x)",
+        "temper.unknown_screen": "I do not recognize this screen. Open the Blacksmith on the Tempering tab.",
+        "temper.recipes_open": (
+            "the recipe list is open. Pick the recipe and do the first Temper "
+            "by hand; after that I repeat the cycle."
+        ),
+        "temper.no_recipe": (
+            "no recipe selected on this item. Pick the category and the recipe "
+            "in game before starting."
+        ),
+        "temper.out_of_rerolls": (
+            "Temper Rerolls ran out. Recharging spends Scrolls — turn on "
+            "automatic recharge if you want me to do it."
+        ),
+        "temper.no_scrolls": (
+            "Temper Rerolls ran out and recharging is not possible: either the "
+            "item is at its limit, or the Scrolls ran out."
+        ),
+        "temper.recharge_limit": "reached the session cap of {count} recharge(s)",
+        "temper.recharge_runaway": (
+            "I clicked recharge {count}x and the item did not fill. Stopped so "
+            "as not to keep spending Scrolls: check whether the recharge button "
+            "is where it should be on screen."
+        ),
+        "temper.unreadable_stop": (
+            "I could not read the result ({raw!r}) and I will not roll over it. "
+            "Check the item in game."
+        ),
+        "tab.temper": "Tempering",
+        "temper.col_affix": "Rolled affix",
+        "temper.col_done": "stopped here",
+        "temper.col_ga": "GA",
+        "temper.col_rolled": "rolled",
+        "temper.hint": (
+            "Open the Blacksmith on the Tempering tab, pick the category and "
+            "the recipe, and do the first Temper by hand. Then press F10."
+        ),
+        "temper.goal_box": "Stop when",
+        "temper.mode_ga": "a Greater Affix comes up",
+        "temper.mode_ga_tip": (
+            "On a GA the game shows only the value, without the bracketed "
+            "range. That is why it can be recognised with no range data at all."
+        ),
+        "temper.mode_fraction": "the roll reaches",
+        "temper.mode_fraction_suffix": "% of the range",
+        "temper.mode_value": "the value reaches",
+        "temper.affix_filter": "and the affix contains",
+        "temper.affix_filter_ph": "leave empty to accept any affix",
+        "temper.affix_filter_tip": (
+            "Some recipes roll among several affixes. Without this, the cycle "
+            "would stop on a GA of the wrong one."
+        ),
+        "temper.rerolls_box": "When Temper Rerolls run out",
+        "temper.recharge_stop": "stop and tell me",
+        "temper.recharge_one": "recharge one at a time",
+        "temper.recharge_full": "fill up to the item's maximum",
+        "temper.recharge_cap": "at most",
+        "temper.recharge_no_cap": "no limit",
+        "temper.recharge_cap_suffix": " recharge(s) this session",
+        "temper.recharge_warn": (
+            "Recharging spends Scrolls. Each item has its own Temper Reroll "
+            "limit, and the circular button greys out when it is reached — or "
+            "when the Scrolls run out."
+        ),
+        "temper.start": "Start Tempering",
+        "temper.hotkey_hint": "F10 starts and stops; F12 only stops.",
+        "temper.done": "{count} attempt(s) in {seconds:.0f}s",
+        "temper.idle": "Ready. Open the Blacksmith on Tempering and press F10.",
+        "temper.running": "Running…",
         "progress.title": "Progress",
         "progress.attempts": "Attempts",
         "progress.elapsed": "Elapsed",

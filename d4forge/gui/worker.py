@@ -36,6 +36,24 @@ class EngineWorker(QThread):
         self._engine.cancel()
 
 
+class TemperWorker(QThread):
+    """Roda o ciclo do Tempering fora da thread da interface."""
+
+    event = Signal(object)         # EngineEvent
+    finished_run = Signal(object)  # TemperOutcome
+
+    def __init__(self, engine, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._engine = engine
+        self._engine._listener = self.event.emit
+
+    def run(self) -> None:
+        self.finished_run.emit(self._engine.run())
+
+    def stop(self) -> None:
+        self._engine.cancel()
+
+
 class WarmupWorker(QThread):
     """Carrega o modelo de OCR em segundo plano assim que a janela abre.
 

@@ -33,6 +33,7 @@ QWidget {{
 QLabel, QCheckBox, QRadioButton {{ background: transparent; }}
 QLabel[role="hint"] {{ color: {TEXTO_FRACO}; }}
 QLabel[role="accent"] {{ color: {DOURADO}; }}
+QLabel[role="error"] {{ color: {VERMELHO_CLARO}; }}
 
 /* -------------------------------------------------- moldura própria */
 QWidget#shell {{
@@ -176,17 +177,27 @@ QComboBox QAbstractItemView {{
     outline: none;
 }}
 
-QCheckBox {{ spacing: 8px; }}
-QCheckBox::indicator {{
+QCheckBox, QRadioButton {{ spacing: 8px; }}
+QCheckBox::indicator, QRadioButton::indicator {{
     width: 15px; height: 15px;
     border: 1px solid {BORDA_CLARA};
-    border-radius: 3px;
     background: {FUNDO_CAMPO};
 }}
-QCheckBox::indicator:checked {{
+QCheckBox::indicator {{ border-radius: 3px; }}
+/* Metade da largura: o quadrado vira circulo. */
+QRadioButton::indicator {{ border-radius: 8px; }}
+/* Sem estas duas regras o indicador MARCADO some. Basta a folha de estilo
+   tocar o widget para o Qt parar de desenhar a versao nativa, e ai um estado
+   sem regra nao e' desenhado por ninguem - o radio selecionado ficava
+   invisivel, que e' justamente o unico que precisa aparecer. */
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background: {DOURADO_FRACO};
     border-color: {DOURADO};
 }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
+    border-color: {DOURADO_FRACO};
+}}
+QCheckBox:disabled, QRadioButton:disabled {{ color: {TEXTO_FRACO}; }}
 
 /* -------------------------------------------------- tabelas e log */
 QPlainTextEdit {{

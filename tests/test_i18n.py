@@ -66,7 +66,7 @@ def test_versao_final_da_interface(qt_app, config_isolada):
     janela = MainWindow(AppState.load())
     try:
         # três abas: Diagnóstico e Desempenho saíram
-        assert janela.tabs.count() == 3
+        assert janela.tabs.count() == 4
         # modo simulação saiu da interface
         assert not hasattr(janela, "chk_dry")
         # velocidade do mouse foi para o painel
@@ -84,11 +84,11 @@ def test_troca_de_idioma_redesenha_a_janela(qt_app, config_isolada):
     janela = MainWindow(AppState.load())
     try:
         janela._set_language("en")
-        assert [janela.tabs.tabText(i) for i in range(3)] == ["Panel", "Target", "Catalog"]
+        assert [janela.tabs.tabText(i) for i in range(4)] == ["Panel", "Target", "Tempering", "Catalog"]
         assert janela.btn_start.text().startswith("Start")
 
         janela._set_language("pt-BR")
-        assert [janela.tabs.tabText(i) for i in range(3)] == ["Painel", "Alvo", "Catálogo"]
+        assert [janela.tabs.tabText(i) for i in range(4)] == ["Painel", "Alvo", "Tempering", "Catálogo"]
         assert janela.btn_start.text().startswith("Iniciar")
     finally:
         janela.close()

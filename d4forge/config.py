@@ -7,9 +7,13 @@ cache de OCR, catalogo e regras sejam faceis de inspecionar, versionar e apagar.
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+
+log = logging.getLogger(__name__)
 
 
 def _dirs() -> tuple[Path, Path]:
@@ -95,6 +99,71 @@ class Settings:
         path = path or SETTINGS_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_json(), indent=2), encoding="utf-8")
+
+
+TEMPER_PATH = DATA_DIR / "temper.json"
+
+
+def load_temper_goal(path: Path | None = None):
+    """Meta do Tempering salva. Devolve o padrao se nao houver arquivo."""
+    from .temper.rules import Recharge, TemperGoal
+
+    # Resolvido na chamada, nunca no cabecalho: um default no `def` fixa o
+    # caminho no import e deixa de ser redirecionavel - o mesmo descuido que
+    # fazia os testes de GUI sobrescreverem os ajustes de verdade.
+    caminho = path or TEMPER_PATH
+    if not caminho.exists():
+        return TemperGoal()
+    # Qualquer defeito no arquivo vira "usa o padrao", NUNCA excecao.
+    #
+    # Isto roda na montagem da janela, entao um valor inesperado aqui nao
+    # estraga uma preferencia: impede o app de ABRIR. Foi o que aconteceu quando
+    # `max_recharges` passou a aceitar None - o arquivo ja' salvo trazia `null`,
+    # `int(None)` estourou, e o programa parou de subir. Um arquivo de ajustes
+    # jamais deveria ter esse poder.
+    try:
+        blob = json.loads(caminho.read_text(encoding="utf-8"))
+        if not isinstance(blob, dict):
+            return TemperGoal()
+
+        teto = blob.get("max_recharges")
+        return TemperGoal(
+            require_greater=bool(blob.get("require_greater", True)),
+            min_fraction=_optional_float(blob.get("min_fraction")),
+            min_value=_optional_float(blob.get("min_value")),
+            affix_contains=str(blob.get("affix_contains") or ""),
+            # A politica de recarga NAO volta do arquivo: ela gasta Pergaminhos
+            # e a escolha e' por sessao. Reabrir o app ja' gastando seria uma
+            # surpresa cara.
+            recharge=Recharge.STOP,
+            max_recharges=int(teto) if teto else None,
+        )
+    except Exception:  # noqa: BLE001 - ver o comentario acima
+        log.warning("temper.json ilegível; usando o padrão", exc_info=True)
+        return TemperGoal()
+
+
+def _optional_float(valor):
+    """Numero, ou None se o arquivo trouxer qualquer outra coisa."""
+    try:
+        return float(valor) if valor is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def save_temper_goal(goal, path: Path | None = None) -> None:
+    caminho = path or TEMPER_PATH
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_text(
+        json.dumps({
+            "require_greater": goal.require_greater,
+            "min_fraction": goal.min_fraction,
+            "min_value": goal.min_value,
+            "affix_contains": goal.affix_contains,
+            "max_recharges": goal.max_recharges,
+        }, indent=2),
+        encoding="utf-8",
+    )
 
 
 def ensure_dirs() -> None:

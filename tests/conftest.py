@@ -40,6 +40,39 @@ def shots():
     return loaded
 
 
+TELAS_TEMPER = {
+    "temper_idle": "temper_idle.jpg",
+    "temper_recipes": "temper_recipes.jpg",
+    "temper_no_recipe": "temper_no_recipe.jpg",
+    "temper_result": "temper_result.jpg",
+    "temper_animation": "temper_animation.jpg",
+    # Par casado do mesmo afixo: com e sem intervalo na linha.
+    "temper_result_normal": "temper_result_normal.jpg",
+    "temper_result_ga": "temper_result_ga.jpg",
+    "temper_no_rerolls": "temper_no_rerolls.jpg",
+    "temper_new_affix": "temper_new_affix.jpg",
+    # Preview do item pelo tooltip, durante a animação.
+    "preview_lucky_hit": "preview_lucky_hit.jpg",
+    "preview_lucky_hit_2": "preview_lucky_hit_2.jpg",
+    "preview_lucky_hit_daze": "preview_lucky_hit_daze.jpg",
+    "preview_movement_ga": "preview_movement_ga.jpg",
+}
+
+
+@pytest.fixture(scope="session")
+def temper_shots():
+    """Telas do Ferreiro, tambem higienizadas: so' o painel esquerdo sobrou."""
+    from d4forge.imageio import imread
+
+    loaded = {}
+    for state, name in TELAS_TEMPER.items():
+        img = imread(SHOTS / name)
+        if img is None:
+            pytest.skip(f"nao consegui ler {name}")
+        loaded[state] = img
+    return loaded
+
+
 @pytest.fixture(scope="session")
 def profiles(shots):
     """Perfil de ROIs resolvido para o tamanho de cada print."""
@@ -96,6 +129,7 @@ def config_isolada(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CATALOG_PATH", dados / "affixes.json")
     monkeypatch.setattr(config, "RULES_PATH", dados / "rules.json")
     monkeypatch.setattr(config, "TIMINGS_PATH", dados / "timings.json")
+    monkeypatch.setattr(config, "TEMPER_PATH", dados / "temper.json")
     return dados
 
 

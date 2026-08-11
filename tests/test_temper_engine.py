@@ -14,6 +14,7 @@ from d4forge.temper.result import TemperResult
 from d4forge.temper.rules import Recharge, TemperGoal, TemperLimits
 from d4forge.temper.states import TemperState
 from d4forge.vision.ocr import OcrEngine
+from d4forge.window import GameWindow
 
 
 class TelaRoteirizada:
@@ -36,6 +37,26 @@ class TelaRoteirizada:
         self.cliques.append(rect.as_tuple())
         self.passo = (self.passo + 1) % len(self.sequencia)
         return Point(0, 0)
+
+
+class JanelaFalsa(GameWindow):
+    """Janela de mentira que HERDA da de verdade.
+
+    Não é preciosismo. O fake solto que existia aqui acertava o nome
+    `is_foreground` por sorte, não por construção — e o mesmo padrão copiado
+    para o Masterworking trouxe `foreground`, que o motor de lá também usava.
+    O teste concordou com o erro e passou; no jogo, a primeira tentativa morria
+    com `'GameWindow' object has no attribute 'foreground'`. Herdando, um nome
+    que não existe na janela real não existe aqui também.
+    """
+
+    def __init__(self, client: Rect, foreground: bool = True) -> None:
+        super().__init__(hwnd=1, title="Diablo IV", client=client, window=client)
+        self._foreground = foreground
+
+    @property
+    def is_foreground(self) -> bool:
+        return self._foreground
 
 
 @pytest.fixture
@@ -66,12 +87,8 @@ def roteiro(monkeypatch, temper_shots, tmp_path):
         client = Rect(0, 0, img.shape[1], img.shape[0])
         tela = TelaRoteirizada(telas, sequencia)
 
-        class Janela:
-            def __init__(self):
-                self.client = client
-                self.is_foreground = True
-
-        monkeypatch.setattr("d4forge.temper.engine.find_game_window", lambda: Janela())
+        janela = JanelaFalsa(client, kwargs.pop("foreground", True))
+        monkeypatch.setattr("d4forge.temper.engine.find_game_window", lambda: janela)
         monkeypatch.setattr("d4forge.temper.engine.click_rect", tela.avanca)
 
         engine = TemperEngine(
@@ -81,7 +98,7 @@ def roteiro(monkeypatch, temper_shots, tmp_path):
             capture=tela,
             poll_interval=0.001,
             state_timeout=1.0,
-            require_foreground=False,
+            require_foreground=kwargs.pop("require_foreground", False),
             **kwargs,
         )
         return engine, tela
@@ -90,6 +107,32 @@ def roteiro(monkeypatch, temper_shots, tmp_path):
 
 
 # ------------------------------------------------------- caminho feliz
+
+def test_roda_com_o_jogo_em_foco(roteiro):
+    """A checagem de primeiro plano não era exercitada: todo teste rodava com
+    `require_foreground=False`. Foi essa lacuna que deixou o mesmo trecho ir
+    quebrado para o jogo no Masterworking."""
+    engine, _ = roteiro(
+        ["temper_idle", "temper_animation", "temper_result_ga"],
+        TemperGoal(require_greater=True),
+        require_foreground=True, foreground=True,
+    )
+    assert engine.run().found
+
+
+def test_para_se_o_jogo_nao_esta_em_primeiro_plano(roteiro):
+    engine, tela = roteiro(
+        ["temper_idle"], TemperGoal(require_greater=True),
+        require_foreground=True, foreground=False,
+    )
+    resultado = engine.run()
+
+    assert not resultado.found
+    # Chave genérica: a `stop.not_foreground` manda apertar F9, que é a tecla
+    # do encantamento e não a deste fluxo.
+    assert resultado.reason_key == "stop.lost_focus"
+    assert tela.cliques == []
+
 
 def test_para_no_greater_affix(roteiro):
     """O ciclo completo: temperar, pular a animação, ler, e encerrar no GA."""

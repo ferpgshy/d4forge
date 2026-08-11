@@ -39,8 +39,15 @@ LINE_GAP = 6
 LINE_PAD = 4
 
 
-def text_bands(mask: np.ndarray) -> list[tuple[int, int]]:
-    """Faixas verticais contiguas com tinta, de cima para baixo."""
+def text_bands(mask: np.ndarray, gap: int = LINE_GAP) -> list[tuple[int, int]]:
+    """Faixas verticais contiguas com tinta, de cima para baixo.
+
+    `gap` e' quantas linhas vazias ainda contam como a MESMA banda. O padrao
+    vale para a tela de resultado do Tempering; a caixa do Masterwork Affix tem
+    o entrelinhas mais apertado (6 px medidos contra 9 la') e pede um valor
+    menor - com o padrao as duas linhas viram uma banda so', e uma banda de duas
+    linhas volta ilegivel do detector.
+    """
     linhas = mask.any(axis=1)
     bandas: list[tuple[int, int]] = []
     inicio, vazio = None, 0
@@ -51,7 +58,7 @@ def text_bands(mask: np.ndarray) -> list[tuple[int, int]]:
             vazio = 0
         elif inicio is not None:
             vazio += 1
-            if vazio > LINE_GAP:
+            if vazio > gap:
                 if y - vazio - inicio >= MIN_LINE_HEIGHT:
                     bandas.append((inicio, y - vazio))
                 inicio = None
@@ -108,12 +115,15 @@ def has_text_lines(frame: np.ndarray, roi: Rect) -> bool:
     return False
 
 
-def read_text_lines(frame: np.ndarray, roi: Rect, ocr, ui_scale: float = 1.0) -> str:
+def read_text_lines(
+    frame: np.ndarray, roi: Rect, ocr, ui_scale: float = 1.0, gap: int = LINE_GAP
+) -> str:
     """Le' uma regiao que pode ter 1, 2 ou 3 linhas, e junta o texto.
 
     Encontrar as linhas antes de ler, em vez de mandar o bloco inteiro para o
     OCR, e' o que faz o resultado de duas linhas ser lido - ver o cabecalho
-    deste modulo.
+    deste modulo. `gap` ajusta o quao apertado o entrelinhas pode ser antes de
+    duas linhas contarem como uma so'.
     """
     crop = roi.crop(frame)
     if crop.size == 0:
@@ -121,7 +131,7 @@ def read_text_lines(frame: np.ndarray, roi: Rect, ocr, ui_scale: float = 1.0) ->
     mask = binarize(to_gray(crop), 120)
 
     partes: list[str] = []
-    for y0, y1 in text_bands(mask):
+    for y0, y1 in text_bands(mask, gap):
         cols = np.flatnonzero(mask[y0:y1].any(axis=0))
         if len(cols) == 0:
             continue

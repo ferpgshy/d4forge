@@ -38,10 +38,13 @@ class TemperTab(QWidget):
         raiz = QVBoxLayout(self)
         raiz.setSpacing(12)
 
-        dica = QLabel(t("temper.hint"))
-        dica.setWordWrap(True)
-        dica.setProperty("role", "hint")
-        raiz.addWidget(dica)
+        # Os widgets com texto ficam guardados em atributos porque a troca de
+        # idioma REAPROVEITA esta aba - refazê-la perderia a sessão em curso.
+        # Ver `retranslate`.
+        self.lbl_hint = QLabel(t("temper.hint"))
+        self.lbl_hint.setWordWrap(True)
+        self.lbl_hint.setProperty("role", "hint")
+        raiz.addWidget(self.lbl_hint)
 
         cartoes = QHBoxLayout()
         cartoes.setSpacing(12)
@@ -58,6 +61,10 @@ class TemperTab(QWidget):
         # dos detalhes tecnicos, que vem recolhidos: na pratica o app parecia
         # nao fazer nada.
         self.status = QLabel(t("temper.idle"))
+        # Enquanto nada rodou, o texto do estado é a frase FIXA de repouso e
+        # deve acompanhar o idioma. Depois que o ciclo escreve nele, passa a ser
+        # o último evento — e reescrevê-lo apagaria o que aconteceu.
+        self._status_e_padrao = True
         self.status.setWordWrap(True)
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setProperty("role", "accent")
@@ -78,7 +85,7 @@ class TemperTab(QWidget):
 
     # ------------------------------------------------------------- meta
     def _build_goal(self) -> QGroupBox:
-        caixa = QGroupBox(t("temper.goal_box"))
+        self.box_goal = caixa = QGroupBox(t("temper.goal_box"))
         col = QVBoxLayout(caixa)
 
         self.grupo_modo = QButtonGroup(self)
@@ -126,7 +133,7 @@ class TemperTab(QWidget):
 
     # -------------------------------------------------------- recarga
     def _build_recharge(self) -> QGroupBox:
-        caixa = QGroupBox(t("temper.rerolls_box"))
+        self.box_rerolls = caixa = QGroupBox(t("temper.rerolls_box"))
         col = QVBoxLayout(caixa)
 
         self.grupo_recarga = QButtonGroup(self)
@@ -168,7 +175,45 @@ class TemperTab(QWidget):
         for w in (self.lbl_cap, self.spin_cap, self.lbl_warn):
             w.setVisible(gasta)
 
+    # ------------------------------------------------------- idioma
+    def retranslate(self) -> None:
+        """Troca os textos NESTES widgets, sem refazer a aba.
+
+        A aba é reaproveitada na troca de idioma de propósito: refazê-la
+        perderia a tabela de tentativas e a política escolhida no meio de uma
+        sessão. O preço é este método, que precisa alcançar todo rótulo fixo —
+        o que ficar de fora continua na língua anterior.
+
+        `status` só entra enquanto ainda mostra a frase de repouso — ver
+        `_status_e_padrao`.
+        """
+        if self._status_e_padrao:
+            self.status.setText(t("temper.idle"))
+        self.lbl_hint.setText(t("temper.hint"))
+
+        self.box_goal.setTitle(t("temper.goal_box"))
+        self.rb_ga.setText(t("temper.mode_ga"))
+        self.rb_ga.setToolTip(t("temper.mode_ga_tip"))
+        self.rb_fraction.setText(t("temper.mode_fraction"))
+        self.spin_fraction.setSuffix(t("temper.mode_fraction_suffix"))
+        self.rb_value.setText(t("temper.mode_value"))
+        self.lbl_affix.setText(t("temper.affix_filter"))
+        self.txt_affix.setPlaceholderText(t("temper.affix_filter_ph"))
+        self.txt_affix.setToolTip(t("temper.affix_filter_tip"))
+
+        self.box_rerolls.setTitle(t("temper.rerolls_box"))
+        self.rb_stop.setText(t("temper.recharge_stop"))
+        self.rb_one.setText(t("temper.recharge_one"))
+        self.rb_full.setText(t("temper.recharge_full"))
+        self.lbl_cap.setText(t("temper.recharge_cap"))
+        self.spin_cap.setSpecialValueText(t("temper.recharge_no_cap"))
+        self.spin_cap.setSuffix(t("temper.recharge_cap_suffix"))
+        self.lbl_warn.setText(t("temper.recharge_warn"))
+
+        self.progress.retranslate()
+
     def set_status(self, texto: str, erro: bool = False) -> None:
+        self._status_e_padrao = False
         self.status.setText(texto)
         self.status.setProperty("role", "error" if erro else "accent")
         # O Qt so' reaplica a folha de estilo quando a propriedade e' anunciada.

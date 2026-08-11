@@ -37,10 +37,14 @@ class EngineWorker(QThread):
 
 
 class TemperWorker(QThread):
-    """Roda o ciclo do Tempering fora da thread da interface."""
+    """Roda o ciclo do Tempering fora da thread da interface.
+
+    Serve tambem ao Masterworking: os dois motores expoem `run`, `cancel` e
+    `_listener`, e e' so' disso que a thread precisa.
+    """
 
     event = Signal(object)         # EngineEvent
-    finished_run = Signal(object)  # TemperOutcome
+    finished_run = Signal(object)  # TemperOutcome | MasterworkOutcome
 
     def __init__(self, engine, parent: QObject | None = None) -> None:
         super().__init__(parent)

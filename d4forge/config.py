@@ -166,6 +166,39 @@ def save_temper_goal(goal, path: Path | None = None) -> None:
     )
 
 
+MW_PATH = DATA_DIR / "masterwork.json"
+
+
+def load_mw_goal(path: Path | None = None):
+    """Alvo do Masterworking salvo. Devolve o padrao se nao houver arquivo.
+
+    Mesma blindagem do Tempering, e pelo mesmo motivo: isto roda na montagem da
+    janela, entao um arquivo estragado aqui nao estraga uma preferencia -
+    impede o app de ABRIR.
+    """
+    from .masterwork.rules import MasterworkGoal
+
+    caminho = path or MW_PATH
+    if not caminho.exists():
+        return MasterworkGoal()
+    try:
+        blob = json.loads(caminho.read_text(encoding="utf-8"))
+        if not isinstance(blob, dict):
+            return MasterworkGoal()
+        return MasterworkGoal(affix=str(blob.get("affix") or ""))
+    except Exception:  # noqa: BLE001 - ver o comentario acima
+        log.warning("masterwork.json ilegível; usando o padrão", exc_info=True)
+        return MasterworkGoal()
+
+
+def save_mw_goal(goal, path: Path | None = None) -> None:
+    caminho = path or MW_PATH
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_text(
+        json.dumps({"affix": goal.affix}, indent=2), encoding="utf-8"
+    )
+
+
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)

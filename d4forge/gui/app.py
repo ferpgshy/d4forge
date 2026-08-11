@@ -47,12 +47,14 @@ from ..rules import Comparison, RuleSet, TargetRule
 from ..vision.ocr import OcrEngine
 from . import style
 from .frameless import FramelessMixin, TitleBarArea
+from .mw_tab import MasterworkTab
 from .progress import ProgressPanel
 from .temper_tab import TemperTab
 from .worker import EngineWorker, TemperWorker, WarmupWorker
 
 VK_F9 = 0x78
 VK_F10 = 0x79
+VK_F11 = 0x7A
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +167,13 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.app = app_state
         self.engine_worker: EngineWorker | None = None
         self.temper_worker: TemperWorker | None = None
+        self.mw_worker: TemperWorker | None = None
+        # Enquanto isto está ligado, mexer nos campos do alvo não grava nada -
+        # ver `_reload_target`.
+        self._carregando_alvo = False
+        self._target_timer = QTimer(self)
+        self._target_timer.setSingleShot(True)
+        self._target_timer.timeout.connect(lambda: self._save_target())
         self._unknown: dict[str, int] = {}
         self._catalog_carregado = False
 
@@ -199,6 +208,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         # limites e o progresso dela. O Catálogo é dos dois, então fica fora.
         self.tabs.addTab(self._build_panel(), t("tab.enchant"))
         self.tabs.addTab(self._build_temper(), t("tab.temper"))
+        self.tabs.addTab(self._build_mw(), t("tab.mw"))
         self.tabs.addTab(self._build_catalog(), t("tab.catalog"))
         # A tabela do catálogo tem ~880 linhas: montá-la só quando alguém abre a
         # aba tira quase um segundo da abertura e da troca de idioma.
@@ -329,6 +339,7 @@ class MainWindow(FramelessMixin, QMainWindow):
                 self.tabs.removeTab(0)
             self.tabs.addTab(self._build_panel(), t("tab.enchant"))
             self.tabs.addTab(self._build_temper(), t("tab.temper"))
+            self.tabs.addTab(self._build_mw(), t("tab.mw"))
             # A aba do catálogo é a MESMA de antes, só com os rótulos trocados:
             # o conteúdo dela não depende de idioma.
             self._retranslate_catalog()
@@ -337,6 +348,17 @@ class MainWindow(FramelessMixin, QMainWindow):
 
             self._reload_target()
             self.progress.retranslate()
+            # As abas do Ferreiro são REAPROVEITADAS (uma aba nova perderia a
+            # sessão), então elas não trocam de idioma sozinhas ao serem
+            # readicionadas: os rótulos internos continuam os de antes. Sem
+            # estas chamadas, metade do app ficava na língua anterior — era
+            # assim desde que a aba do Tempering existe.
+            self.temper_tab.retranslate()
+            self.btn_temper.setText(f"{t('temper.start')}   ·   F10")
+            self.btn_temper_stop.setText(f"{t('panel.stop')}   ·   F12")
+            self.mw_tab.retranslate()
+            self.btn_mw.setText(f"{t('mw.start')}   ·   F11")
+            self.btn_mw_stop.setText(f"{t('panel.stop')}   ·   F12")
             self.lbl_subtitle.setText(t("app.subtitle"))
             self._refresh_lang_button()
         finally:
@@ -545,18 +567,52 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.chk_climb.setToolTip(t("target.climb_tip"))
         form.addWidget(self.chk_climb)
 
-        rodape = QHBoxLayout()
         self.lbl_target_summary = QLabel("")
         self.lbl_target_summary.setProperty("role", "hint")
         self.lbl_target_summary.setWordWrap(True)
-        rodape.addWidget(self.lbl_target_summary, 1)
-        salvar = QPushButton(t("target.save"))
-        salvar.clicked.connect(self._save_target)
-        rodape.addWidget(salvar)
-        form.addLayout(rodape)
+        form.addWidget(self.lbl_target_summary)
+
+        # Alvo salvo sozinho: o botão "Salvar alvo" só persistia em disco, já
+        # que Iniciar/F9 sempre chamou `_save_target` antes de rodar. Na
+        # prática ele era uma lembrança a mais para dar errado — quem fechasse
+        # o app sem apertá-lo perdia o alvo, e o botão em nada avisava disso.
+        #
+        # Ligado DEPOIS de os widgets terem seus valores iniciais: ligar antes
+        # faria o próprio nascimento deles disparar uma gravação.
+        for w, sinal in (
+            (self.cmb_affix, "currentTextChanged"),
+            (self.cmb_slot, "currentIndexChanged"),
+            (self.cmb_comparison, "currentIndexChanged"),
+            (self.spin_value, "valueChanged"),
+            (self.spin_quality, "valueChanged"),
+            (self.chk_climb, "toggled"),
+        ):
+            getattr(w, sinal).connect(self._on_target_edited)
         return box
 
+    # Espera antes de gravar em disco depois da última tecla.
+    #
+    # O resumo na tela atualiza na hora; só a gravação espera. Sem isto,
+    # digitar "Dodge Chance" escreveria rules.json doze vezes, uma por letra, e
+    # cada nome pela metade viraria uma regra salva no caminho.
+    TARGET_SAVE_DELAY_MS = 500
+
+    def _on_target_edited(self, *_args) -> None:
+        if self._carregando_alvo:
+            return
+        # O resumo é o retorno visual de que o alvo foi entendido, então ele não
+        # espera o temporizador.
+        self._save_target(silencioso=True)
+        self._target_timer.start(self.TARGET_SAVE_DELAY_MS)
+
     def _refresh_affix_choices(self, *_args) -> None:
+        # O Masterworking come do mesmo catálogo, então ele acompanha: salvar o
+        # catálogo ou absorver um afixo novo tem de aparecer nas duas listas.
+        # A aba é construída depois desta chamada na primeira montagem.
+        if hasattr(self, "mw_tab"):
+            self.mw_tab.catalog = self.app.catalog
+            self.mw_tab.refresh_affixes()
+
         atual = self.cmb_affix.currentText()
         slot = self.cmb_slot.currentData() if hasattr(self, "cmb_slot") else None
         nomes = sorted(e.name for e in self.app.catalog.for_slot(slot))
@@ -586,18 +642,35 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.lbl_unit.setText(f"{unidade}  ·  {faixa}")
 
     def _reload_target(self) -> None:
-        self._refresh_affix_choices()
-        rule = self.app.ruleset.rules[0] if self.app.ruleset.rules else None
-        if rule is None:
-            self.lbl_target_summary.setText(t("target.none"))
-            return
-        self.cmb_affix.setCurrentText(rule.affix_name)
-        self.cmb_comparison.setCurrentIndex(list(Comparison).index(rule.comparison))
-        self.spin_value.setValue(rule.threshold)
-        self.spin_quality.setValue(0 if rule.min_quality is None else rule.min_quality * 100)
-        self.chk_climb.setChecked(rule.climb)
-        self.lbl_target_summary.setText(t("target.saved", rule=rule.describe()))
-        self._update_unit_hint()
+        """Repõe o alvo salvo nos controles.
+
+        A trava impede que encher os campos conte como edição: eles disparam os
+        mesmos sinais que o usuário dispararia.
+
+        Hoje ela não muda o resultado, e vale dizer por quê: o afixo é o
+        PRIMEIRO campo reposto, então todo sinal que dispara daqui já carrega o
+        nome certo e a gravação automática regrava a mesma regra. O que a trava
+        compra é que essa ordem deixe de ser load-bearing — inverter duas linhas
+        aqui salvaria uma regra sem afixo, que é o mesmo que apagar o alvo.
+        """
+        self._carregando_alvo = True
+        try:
+            self._refresh_affix_choices()
+            rule = self.app.ruleset.rules[0] if self.app.ruleset.rules else None
+            if rule is None:
+                self.lbl_target_summary.setText(t("target.none"))
+                return
+            self.cmb_affix.setCurrentText(rule.affix_name)
+            self.cmb_comparison.setCurrentIndex(list(Comparison).index(rule.comparison))
+            self.spin_value.setValue(rule.threshold)
+            self.spin_quality.setValue(
+                0 if rule.min_quality is None else rule.min_quality * 100
+            )
+            self.chk_climb.setChecked(rule.climb)
+            self.lbl_target_summary.setText(t("target.saved", rule=rule.describe()))
+            self._update_unit_hint()
+        finally:
+            self._carregando_alvo = False
 
     def _save_target(self, silencioso: bool = False) -> None:
         nome = self.cmb_affix.currentText().strip()
@@ -772,15 +845,21 @@ class MainWindow(FramelessMixin, QMainWindow):
     def _poll_hotkeys(self) -> None:
         rodando = bool(self.engine_worker and self.engine_worker.isRunning())
         temperando = bool(self.temper_worker and self.temper_worker.isRunning())
+        masterizando = bool(self.mw_worker and self.mw_worker.isRunning())
         if key_pressed_once(VK_F9):
             self._stop() if rodando else self._start()
         elif key_pressed_once(VK_F10):
             self._stop_temper() if temperando else self._start_temper()
+        elif key_pressed_once(VK_F11):
+            self._stop_mw() if masterizando else self._start_mw()
         elif key_pressed_once(VK_F12):
+            # F12 é o freio de todos: quem aperta em pânico não escolhe qual.
             if rodando:
                 self._stop()
             if temperando:
                 self._stop_temper()
+            if masterizando:
+                self._stop_mw()
 
     # ---------------------------------------------------------- ciclo/vida
     def _collect_settings(self) -> None:
@@ -926,6 +1005,84 @@ class MainWindow(FramelessMixin, QMainWindow):
         # ciclo para sem nenhuma tentativa, esta linha é a única coisa que
         # distingue "falhou" de "não fez nada".
         self.temper_tab.set_status(outcome.reason, erro=not outcome.found)
+        self.app.save()
+
+    # --------------------------------------------------------- masterworking
+    def _build_mw(self) -> QWidget:
+        # Um só painel para a vida toda da janela, como os outros dois: trocar
+        # de idioma recria as abas e um painel novo perderia a sessão.
+        if not hasattr(self, "mw_tab"):
+            self.mw_tab = MasterworkTab(self.app.catalog)
+            self.mw_tab.load(config.load_mw_goal())
+
+            botoes = QHBoxLayout()
+            self.btn_mw = QPushButton(f"{t('mw.start')}   ·   F11")
+            self.btn_mw.setObjectName("start")
+            self.btn_mw.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_mw.clicked.connect(self._start_mw)
+            self.btn_mw_stop = QPushButton(f"{t('panel.stop')}   ·   F12")
+            self.btn_mw_stop.setObjectName("stop")
+            self.btn_mw_stop.setEnabled(False)
+            self.btn_mw_stop.clicked.connect(self._stop_mw)
+            botoes.addWidget(self.btn_mw, 2)
+            botoes.addWidget(self.btn_mw_stop, 1)
+            self.mw_tab.layout().insertLayout(1, botoes)
+        return self.mw_tab
+
+    def _start_mw(self) -> None:
+        if self.mw_worker and self.mw_worker.isRunning():
+            return
+        goal = self.mw_tab.goal()
+        # Sem alvo, o ciclo aceitaria a primeira leitura boa e pararia na hora —
+        # o usuário teria gasto uma rodada para nada. Pior: se ele apertasse de
+        # novo achando que ia perseguir algo, cada aperto seria mais uma rodada.
+        if not goal.affix:
+            QMessageBox.warning(self, t("mw.start"), t("mw.no_target"))
+            return
+        config.save_mw_goal(goal)
+        s = self.app.settings
+
+        from ..masterwork.engine import MasterworkEngine
+
+        engine = MasterworkEngine(
+            goal=goal,
+            ocr=self.app.ocr,
+            catalog=self.app.catalog,
+            limits=self.mw_tab.limits(),
+            profiler=self.app.profiler,
+            input_profile=PROFILES.get(s.input_speed, DEFAULT_INPUT),
+            require_foreground=s.require_foreground,
+        )
+
+        self.mw_tab.progress.reset()
+        self.mw_tab.set_status(t("mw.running"))
+        self.mw_worker = TemperWorker(engine)
+        self.mw_worker.event.connect(self._on_mw_event)
+        self.mw_worker.finished_run.connect(self._on_mw_finished)
+        self.mw_worker.start()
+
+    def _on_mw_event(self, evt) -> None:
+        self.mw_tab.progress.push(evt)
+        if evt.kind in (EventKind.STATE, EventKind.INFO):
+            self.mw_tab.set_status(evt.message)
+
+        self.btn_mw.setEnabled(False)
+        self.btn_mw_stop.setEnabled(True)
+
+    def _stop_mw(self) -> None:
+        if self.mw_worker:
+            self.mw_worker.stop()
+            self.btn_mw_stop.setEnabled(False)
+
+    def _on_mw_finished(self, outcome) -> None:
+        self.btn_mw.setEnabled(True)
+        self.btn_mw_stop.setEnabled(False)
+        self.mw_tab.progress.finish(outcome)
+        self.mw_tab.progress.note(
+            "mw.done", count=outcome.count, seconds=outcome.elapsed_s
+        )
+        self.mw_tab.progress.note(outcome.reason_key, **outcome.params)
+        self.mw_tab.set_status(outcome.reason, erro=not outcome.found)
         self.app.save()
 
     def _on_event(self, evt: EngineEvent) -> None:

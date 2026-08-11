@@ -65,8 +65,9 @@ def test_versao_final_da_interface(qt_app, config_isolada):
 
     janela = MainWindow(AppState.load())
     try:
-        # uma aba por fluxo (Enchant, Tempering) mais o Catálogo, que é dos dois
-        assert janela.tabs.count() == 3
+        # uma aba por fluxo (Enchant, Tempering, Masterworking) mais o
+        # Catálogo, que é dos três
+        assert janela.tabs.count() == 4
         # o alvo virou cartão dentro do Enchant, não uma aba à parte
         assert janela.cmb_affix is not None
         # modo simulação saiu da interface
@@ -80,18 +81,236 @@ def test_versao_final_da_interface(qt_app, config_isolada):
         janela.close()
 
 
+def test_alvo_do_enchant_salva_sozinho(qt_app, config_isolada):
+    """O botão "Salvar alvo" saiu: quem fechasse o app sem apertá-lo perdia o
+    alvo, e nada na tela avisava disso. Agora editar já vale.
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        rotulos = [b.text() for b in janela.findChildren(QPushButton)]
+        assert not any("Salvar alvo" in r or "Save target" in r for r in rotulos), rotulos
+
+        janela.cmb_affix.setCurrentText("Dodge Chance")
+        janela.spin_value.setValue(7.5)
+
+        # A regra vale na hora, sem esperar o temporizador do disco.
+        assert janela.app.ruleset.rules[0].affix_name == "Dodge Chance"
+        assert janela.app.ruleset.rules[0].threshold == pytest.approx(7.5)
+        # E o resumo é o retorno visual de que o alvo foi entendido.
+        assert "Dodge Chance" in janela.lbl_target_summary.text()
+    finally:
+        janela.close()
+
+
+def test_gravacao_do_alvo_espera_parar_de_digitar(qt_app, config_isolada):
+    """Cada letra escreveria rules.json, e cada nome pela metade viraria uma
+    regra salva no caminho. O disco espera; a tela não."""
+    from d4forge import config
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.cmb_affix.setCurrentText("Dodge Chance")
+        assert janela._target_timer.isActive()
+        assert janela._target_timer.isSingleShot()
+
+        # Disparando o que o temporizador dispararia:
+        janela._save_target()
+        assert config.RULES_PATH.exists()
+        assert "Dodge Chance" in config.RULES_PATH.read_text(encoding="utf-8")
+    finally:
+        janela.close()
+
+
+def test_refazer_a_aba_preserva_o_alvo(qt_app, config_isolada):
+    """Trocar de idioma refaz o cartão do alvo, e encher os campos novos dispara
+    os mesmos sinais que uma edição de verdade. A regra tem de sair inteira."""
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.cmb_affix.setCurrentText("Dodge Chance")
+        janela.spin_value.setValue(7.5)
+
+        janela._set_language("en")
+
+        assert janela.app.ruleset.rules, "o alvo sumiu ao refazer a aba"
+        assert janela.app.ruleset.rules[0].affix_name == "Dodge Chance"
+        assert janela.cmb_affix.currentText() == "Dodge Chance"
+    finally:
+        janela.close()
+
+
+def test_repor_o_alvo_nao_conta_como_edicao(qt_app, config_isolada):
+    """A trava de `_reload_target`, testada direto.
+
+    Hoje ela não muda o resultado do teste acima, porque o afixo é o primeiro
+    campo reposto e todo sinal já sai com o nome certo. O que ela compra é que
+    essa ordem deixe de importar: com a trava ligada, mexer nos campos não
+    escreve regra nenhuma — inverter duas linhas na reposição deixa de poder
+    salvar um alvo sem afixo.
+    """
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.cmb_affix.setCurrentText("Dodge Chance")
+        antes = list(janela.app.ruleset.rules)
+
+        # Uma reposição na ordem ruim: mexe nos outros campos com o afixo ainda
+        # vazio. Sem a trava, o primeiro sinal salvaria uma regra sem afixo —
+        # que é como o código representa "não há alvo".
+        janela._carregando_alvo = True
+        janela.cmb_affix.setCurrentText("")
+        janela.spin_value.setValue(99)
+        janela.chk_climb.setChecked(False)
+        assert janela.app.ruleset.rules == antes, "a reposição gravou por conta"
+
+        # Terminada a reposição, o campo volta ao valor reposto e a edição de
+        # verdade volta a valer.
+        janela.cmb_affix.setCurrentText("Dodge Chance")
+        janela._carregando_alvo = False
+        janela.spin_value.setValue(42)
+        assert janela.app.ruleset.rules[0].affix_name == "Dodge Chance"
+        assert janela.app.ruleset.rules[0].threshold == pytest.approx(42)
+    finally:
+        janela.close()
+
+
+def test_apagar_o_afixo_desfaz_o_alvo(qt_app, config_isolada):
+    """Limpar o campo tem de limpar a regra — senão o alvo antigo continuaria
+    valendo com a tela dizendo o contrário."""
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.cmb_affix.setCurrentText("Dodge Chance")
+        assert janela.app.ruleset.rules
+
+        janela.cmb_affix.setCurrentText("")
+        assert janela.app.ruleset.rules == []
+        assert janela.lbl_target_summary.text() == "Nenhum alvo definido"
+    finally:
+        janela.close()
+
+
 def test_troca_de_idioma_redesenha_a_janela(qt_app, config_isolada):
     from d4forge.gui.app import AppState, MainWindow
 
     janela = MainWindow(AppState.load())
     try:
         janela._set_language("en")
-        assert [janela.tabs.tabText(i) for i in range(3)] == ["Enchant", "Tempering", "Catalog"]
+        assert [janela.tabs.tabText(i) for i in range(4)] == [
+            "Enchant", "Tempering", "Masterworking", "Catalog"
+        ]
         assert janela.btn_start.text().startswith("Start")
 
         janela._set_language("pt-BR")
-        assert [janela.tabs.tabText(i) for i in range(3)] == ["Enchant", "Tempering", "Catálogo"]
+        assert [janela.tabs.tabText(i) for i in range(4)] == [
+            "Enchant", "Tempering", "Masterworking", "Catálogo"
+        ]
         assert janela.btn_start.text().startswith("Iniciar")
+    finally:
+        janela.close()
+
+
+def test_abas_do_ferreiro_trocam_de_idioma(qt_app, config_isolada):
+    """As abas do Tempering e do Masterworking são REAPROVEITADAS na troca de
+    idioma — uma aba nova perderia a sessão em curso. Isso as fazia ficar na
+    língua anterior: dica, títulos dos cartões, rádios e botão de iniciar.
+    """
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela._set_language("en")
+
+        assert janela.temper_tab.lbl_hint.text().startswith("Open the Blacksmith")
+        assert janela.temper_tab.box_goal.title() == "Stop when"
+        assert janela.temper_tab.rb_stop.text() == "stop and tell me"
+        assert janela.btn_temper.text().startswith("Start Tempering")
+
+        assert janela.mw_tab.lbl_hint.text().startswith("Open the Blacksmith")
+        assert janela.mw_tab.box_limits.title() == "Limits"
+        assert janela.btn_mw.text().startswith("Start Masterworking")
+        # O cabeçalho da tabela de progresso vem junto.
+        assert janela.mw_tab.progress.tabela.horizontalHeaderItem(2).text() == "Result"
+        # E a linha de estado em repouso também: ela é frase fixa.
+        assert janela.mw_tab.status.text().startswith("Ready.")
+        assert janela.temper_tab.status.text().startswith("Ready.")
+
+        janela._set_language("pt-BR")
+        assert janela.mw_tab.box_limits.title() == "Limites"
+        assert janela.temper_tab.rb_stop.text() == "parar e me avisar"
+    finally:
+        janela.close()
+
+
+def test_campo_de_afixo_do_masterworking_busca_como_o_do_enchant(
+    qt_app, config_isolada
+):
+    """Digitar tem de filtrar a lista, e por TRECHO — o nome quase nunca começa
+    pela palavra que a gente lembra. Sem completador o campo era só uma caixa
+    preta muda."""
+    from PySide6.QtCore import Qt
+
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        mw = janela.mw_tab.cmb_affix
+        completer = mw.completer()
+        assert completer is not None
+        assert completer.filterMode() == Qt.MatchFlag.MatchContains
+        assert completer.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+        # Mesma lista do Enchant, e cheia.
+        assert len(janela.mw_tab._affix_model.stringList()) > 800
+
+        # "resist" no meio do nome tem de achar algo.
+        completer.setCompletionPrefix("resist")
+        assert completer.completionCount() > 0
+        assert "resist" in completer.currentCompletion().lower()
+
+        # E o campo continua aceitando texto livre: o Masterwork cai em afixos
+        # que o catálogo do Occultist não tem, como os vindos do Tempering.
+        mw.setCurrentText("Damage with Two-Handed Slashing Weapons")
+        assert janela.mw_tab.goal().affix == "Damage with Two-Handed Slashing Weapons"
+    finally:
+        janela.close()
+
+
+def test_troca_de_idioma_nao_apaga_o_que_o_ciclo_escreveu(qt_app, config_isolada):
+    """A linha de estado guarda o último evento depois que a sessão roda.
+
+    Traduzi-la de volta para a frase de repouso apagaria justamente a única
+    coisa visível quando o ciclo para antes da primeira tentativa.
+    """
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.mw_tab.set_status("caiu em +182 Strength", erro=False)
+        janela._set_language("en")
+        assert janela.mw_tab.status.text() == "caiu em +182 Strength"
+    finally:
+        janela.close()
+
+
+def test_troca_de_idioma_preserva_o_alvo_do_masterworking(qt_app, config_isolada):
+    """Retraduzir não pode apagar o que o usuário digitou."""
+    from d4forge.gui.app import AppState, MainWindow
+
+    janela = MainWindow(AppState.load())
+    try:
+        janela.mw_tab.cmb_affix.setCurrentText("Strength")
+        janela.mw_tab.spin_attempts.setValue(17)
+        janela._set_language("en")
+        assert janela.mw_tab.cmb_affix.currentText() == "Strength"
+        assert janela.mw_tab.spin_attempts.value() == 17
     finally:
         janela.close()
 

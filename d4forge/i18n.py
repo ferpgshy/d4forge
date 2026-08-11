@@ -25,7 +25,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "pt-BR": {
         # -- janela e cabeçalho
         "app.title": "d4forge",
-        "app.subtitle": "Encantamento e Tempering — Diablo IV",
+        "app.subtitle": "Encantamento, Tempering e Masterworking — Diablo IV",
         "app.window": "d4forge",
         # -- abas
         "tab.enchant": "Enchant",
@@ -80,7 +80,6 @@ STRINGS: dict[str, dict[str, str]] = {
             "Enquanto a peça não tem o afixo, aceita qualquer valor. Depois só "
             "aceita valor maior, até a meta."
         ),
-        "target.save": "Salvar alvo",
         "target.saved": "Alvo: {rule}",
         "target.none": "Nenhum alvo definido",
         "target.no_range": "faixa não cadastrada",
@@ -270,6 +269,57 @@ STRINGS: dict[str, dict[str, str]] = {
         "temper.done": "{count} tentativa(s) em {seconds:.0f}s",
         "temper.idle": "Pronto. Abra o Ferreiro no Tempering e aperte F10.",
         "temper.running": "Rodando…",
+        # -- masterworking
+        "tab.mw": "Masterworking",
+        "mw.hint": (
+            "Abra o Ferreiro na aba Masterworking com o item selecionado, "
+            "escolha o afixo que você quer, e aperte F11. Cada rodada é "
+            "Upgrade → ESC → ESC, e o afixo é lido direto do painel."
+        ),
+        "mw.goal_box": "Parar quando o Masterwork cair em",
+        "mw.affix_ph": "digite ou escolha o afixo do item",
+        "mw.affix_tip": (
+            "Vale qualquer afixo do item, inclusive os que vieram do "
+            "Tempering — a lista é só sugestão, você pode digitar."
+        ),
+        "mw.replace_warn": (
+            "Cada rodada SUBSTITUI o Masterwork Affix atual. Na dúvida sobre o "
+            "que está no item, o ciclo para em vez de rolar por cima."
+        ),
+        "mw.limits_box": "Limites",
+        "mw.max_attempts": "Tentativas",
+        "mw.max_minutes": "Minutos",
+        "mw.no_cap": "sem limite",
+        "mw.cost_warn": "Cada rodada custa ouro e materiais do Masterworking.",
+        "mw.start": "Iniciar Masterworking",
+        "mw.idle": "Pronto. Abra o Ferreiro no Masterworking e aperte F11.",
+        "mw.running": "Rodando…",
+        "mw.done": "{count} tentativa(s) em {seconds:.0f}s",
+        "mw.col_affix": "Masterwork Affix",
+        "mw.col_done": "parou aqui",
+        "mw.col_rolled": "rolou",
+        "mw.col_unreadable": "ilegível",
+        "mw.goal": "Alvo: {goal}",
+        "mw.goal_any": "qualquer afixo legível",
+        "mw.attempt": "#{index}: {affix} — {reason}",
+        "mw.escape": "ESC ({index})",
+        "mw.got_target": "caiu no afixo alvo: {affix}",
+        "mw.got_any": "Masterwork lido: {affix}",
+        "mw.other_affix": "caiu em {affix}, e não em {want}",
+        "mw.unreadable": "não consegui ler o Masterwork Affix",
+        "mw.unreadable_stop": (
+            "não consegui ler o Masterwork Affix ({raw!r}) e não vou rolar por "
+            "cima dele. Confira o item no jogo."
+        ),
+        "mw.cannot_upgrade": (
+            "o botão Upgrade está cinza: falta ouro ou material, ou o item "
+            "chegou ao limite."
+        ),
+        "mw.stuck_modal": (
+            "mandei ESC {presses} vezes e o painel do Ferreiro não voltou. "
+            "Parei em vez de continuar mandando tecla às cegas."
+        ),
+        "mw.no_target": "Escolha o afixo alvo no Masterworking antes de iniciar.",
         "progress.title": "Progresso",
         "progress.attempts": "Tentativas",
         "progress.elapsed": "Tempo",
@@ -293,7 +343,7 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "en": {
         "app.title": "d4forge",
-        "app.subtitle": "Enchanting & Tempering — Diablo IV",
+        "app.subtitle": "Enchanting, Tempering & Masterworking — Diablo IV",
         "app.window": "d4forge",
         "tab.enchant": "Enchant",
         "tab.catalog": "Catalog",
@@ -345,7 +395,6 @@ STRINGS: dict[str, dict[str, str]] = {
             "While the item lacks the affix, any value is taken. After that, "
             "only a higher value is accepted, up to the goal."
         ),
-        "target.save": "Save target",
         "target.saved": "Target: {rule}",
         "target.none": "No target set",
         "target.no_range": "range not set",
@@ -527,6 +576,57 @@ STRINGS: dict[str, dict[str, str]] = {
         "temper.done": "{count} attempt(s) in {seconds:.0f}s",
         "temper.idle": "Ready. Open the Blacksmith on Tempering and press F10.",
         "temper.running": "Running…",
+        "tab.mw": "Masterworking",
+        "mw.hint": (
+            "Open the Blacksmith on the Masterworking tab with the item "
+            "selected, pick the affix you want, and press F11. Each pass is "
+            "Upgrade → ESC → ESC, and the affix is read straight off the panel."
+        ),
+        "mw.goal_box": "Stop when the Masterwork lands on",
+        "mw.affix_ph": "type or pick the item's affix",
+        "mw.affix_tip": (
+            "Any affix on the item counts, including the ones that came from "
+            "Tempering — the list is only a suggestion, you can type."
+        ),
+        "mw.replace_warn": (
+            "Each pass REPLACES the current Masterwork Affix. When in doubt "
+            "about what is on the item, the cycle stops instead of rolling "
+            "over it."
+        ),
+        "mw.limits_box": "Limits",
+        "mw.max_attempts": "Attempts",
+        "mw.max_minutes": "Minutes",
+        "mw.no_cap": "no limit",
+        "mw.cost_warn": "Each pass costs gold and Masterworking materials.",
+        "mw.start": "Start Masterworking",
+        "mw.idle": "Ready. Open the Blacksmith on Masterworking and press F11.",
+        "mw.running": "Running…",
+        "mw.done": "{count} attempt(s) in {seconds:.0f}s",
+        "mw.col_affix": "Masterwork Affix",
+        "mw.col_done": "stopped here",
+        "mw.col_rolled": "rolled",
+        "mw.col_unreadable": "unreadable",
+        "mw.goal": "Target: {goal}",
+        "mw.goal_any": "any readable affix",
+        "mw.attempt": "#{index}: {affix} — {reason}",
+        "mw.escape": "ESC ({index})",
+        "mw.got_target": "landed on the target affix: {affix}",
+        "mw.got_any": "Masterwork read: {affix}",
+        "mw.other_affix": "landed on {affix}, not on {want}",
+        "mw.unreadable": "could not read the Masterwork Affix",
+        "mw.unreadable_stop": (
+            "could not read the Masterwork Affix ({raw!r}) and I will not roll "
+            "over it. Check the item in game."
+        ),
+        "mw.cannot_upgrade": (
+            "the Upgrade button is greyed out: missing gold or materials, or "
+            "the item hit its limit."
+        ),
+        "mw.stuck_modal": (
+            "I sent ESC {presses} times and the Blacksmith panel did not come "
+            "back. Stopped instead of sending more keys blindly."
+        ),
+        "mw.no_target": "Pick the target affix under Masterworking before starting.",
         "progress.title": "Progress",
         "progress.attempts": "Attempts",
         "progress.elapsed": "Elapsed",

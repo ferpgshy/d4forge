@@ -21,6 +21,8 @@ dist/
 # As telas de teste higienizadas vivem em tests/fixtures/telas/
 PRINTS*/
 ESTRATEGIA/
+Masterworking/PRINTS INTEIROS/
+Masterworking/PRINTS CORTADOS/
 
 # funcionalidade ainda nao construida: a especificacao entra no repositorio
 # quando o codigo dela entrar junto

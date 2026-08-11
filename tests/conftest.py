@@ -85,6 +85,27 @@ def profiles(shots):
     }
 
 
+TELAS_MW = {
+    "mw_idle": "mw_idle.jpg",        # NEXT RANK / QUALITY 0/25
+    "mw_affix": "mw_affix.jpg",      # Current Masterwork Affix
+    "mw_animation": "mw_animation.jpg",
+}
+
+
+@pytest.fixture(scope="session")
+def mw_shots():
+    """Telas do Masterworking, higienizadas como as outras."""
+    from d4forge.imageio import imread
+
+    loaded = {}
+    for state, name in TELAS_MW.items():
+        img = imread(SHOTS / name)
+        if img is None:
+            pytest.skip(f"nao consegui ler {name}")
+        loaded[state] = img
+    return loaded
+
+
 @pytest.fixture(scope="session")
 def ocr(tmp_path_factory):
     from d4forge.vision.ocr import OcrEngine
@@ -130,6 +151,7 @@ def config_isolada(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RULES_PATH", dados / "rules.json")
     monkeypatch.setattr(config, "TIMINGS_PATH", dados / "timings.json")
     monkeypatch.setattr(config, "TEMPER_PATH", dados / "temper.json")
+    monkeypatch.setattr(config, "MW_PATH", dados / "masterwork.json")
     return dados
 
 

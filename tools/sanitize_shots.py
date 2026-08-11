@@ -72,20 +72,41 @@ TELAS_PREVIEW = {
 }
 TOOLTIP = Rect(676, 60, 400, 820)
 
+# Masterworking: mesma janela do Ferreiro, mesmo canto, mesma máscara.
+ORIGEM_MW = ROOT / "Masterworking" / "PRINTS INTEIROS"
+TELAS_MW = {
+    # Passo comum: "NEXT RANK / QUALITY 0/25". Nenhum Masterwork nesta rodada.
+    "mw_idle": "image.png",
+    # Depois do Masterwork: "Current Masterwork Affix" no lugar do NEXT RANK,
+    # com o afixo sorteado em duas linhas. É o par que prova o sinal.
+    "mw_affix": "image copy.png",
+    # Animação, com o botão Skip.
+    "mw_animation": "image copy 2.png",
+}
+# Estes prints foram tirados com o overlay de transmissão ligado, e ele cai
+# dentro do painel: apelidos de OUTRAS pessoas, no canto superior esquerdo.
+# Fica acima do "BLACKSMITH" e não encosta em nada que o app leia.
+OVERLAY_LIVE = Rect(0, 0, 215, 66)
+
 # Regiões que o app realmente lê, em pixels de referência (1920x1080).
 PAINEL = Rect(0, 0, 700, 968)          # Occultist; termina antes da linha de ouro
 DIALOGO = Rect(676, 370, 580, 320)     # janela Accept / Cancel
 
 
-def sanitizar(img: np.ndarray, regioes=(PAINEL, DIALOGO)) -> np.ndarray:
+def sanitizar(img: np.ndarray, regioes=(PAINEL, DIALOGO), apagar=()) -> np.ndarray:
     limpo = np.zeros_like(img)
     for regiao in regioes:
         r = regiao.clip_to(Rect(0, 0, img.shape[1], img.shape[0]))
         limpo[r.top:r.bottom, r.left:r.right] = img[r.top:r.bottom, r.left:r.right]
+    # Recortar por região preserva tudo o que cai dentro dela, inclusive o que
+    # não é jogo. Estes retângulos são apagados DEPOIS, por cima.
+    for regiao in apagar:
+        r = regiao.clip_to(Rect(0, 0, img.shape[1], img.shape[0]))
+        limpo[r.top:r.bottom, r.left:r.right] = 0
     return limpo
 
 
-def gerar(origem: Path, telas: dict[str, str], regioes=(PAINEL, DIALOGO)) -> None:
+def gerar(origem: Path, telas: dict[str, str], regioes=(PAINEL, DIALOGO), apagar=()) -> None:
     if not origem.is_dir():
         print(f"origem não encontrada: {origem} — pulando")
         return
@@ -95,7 +116,7 @@ def gerar(origem: Path, telas: dict[str, str], regioes=(PAINEL, DIALOGO)) -> Non
             print(f"!! não consegui ler {arquivo}")
             continue
         destino = DESTINO / f"{estado}.jpg"
-        imwrite(destino, sanitizar(img, regioes))
+        imwrite(destino, sanitizar(img, regioes, apagar))
         print(f"{destino.relative_to(ROOT)}  {destino.stat().st_size // 1024} KB")
 
 
@@ -106,6 +127,7 @@ def main() -> int:
     # o resto só exporia o personagem e o cenário à toa.
     gerar(ORIGEM_TEMPER, TELAS_TEMPER, regioes=(PAINEL,))
     gerar(ORIGEM_PREVIEW, TELAS_PREVIEW, regioes=(PAINEL, TOOLTIP))
+    gerar(ORIGEM_MW, TELAS_MW, regioes=(PAINEL,), apagar=(OVERLAY_LIVE,))
 
     if not ORIGEM.is_dir():
         print("\norigem do Occultist ausente; pulando a conferência de estado")

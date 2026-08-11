@@ -25,11 +25,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "pt-BR": {
         # -- janela e cabeçalho
         "app.title": "d4forge",
-        "app.subtitle": "Encantamento — Diablo IV",
+        "app.subtitle": "Encantamento e Tempering — Diablo IV",
         "app.window": "d4forge",
         # -- abas
-        "tab.panel": "Painel",
-        "tab.target": "Alvo",
+        "tab.enchant": "Enchant",
         "tab.catalog": "Catálogo",
         # -- painel
         "panel.idle": "Parado",
@@ -64,7 +63,7 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "panel.attempts_done": "{count} tentativa(s) em {seconds:.0f}s",
         # -- alvo
-        "target.box": "Parar quando aparecer",
+        "target.box": "Alvo — parar quando aparecer",
         "target.slot": "Peça",
         "target.slot_all": "Todas",
         "target.slot_tip": "Filtra os afixos pela peça que você vai encantar.",
@@ -90,7 +89,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "target.unit_flat": "pontos",
         "target.unit_percent": "%",
         "target.unit_rank": "níveis",
-        "target.hint": "O Occultist troca um afixo por vez, então o alvo é um só.",
         # -- catálogo
         "catalog.hint": (
             "Preencha mín/máx para usar o critério de roll. Slots separados por "
@@ -113,7 +111,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "unknown.add": "Adicionar",
         "unknown.added": "{count} afixo(s) adicionado(s) — revise unidade e faixa no Catálogo",
         # -- mensagens
-        "msg.no_target": "Defina um alvo na aba Alvo antes de iniciar.",
+        "msg.no_target": "Escolha o afixo alvo no Enchant antes de iniciar.",
         "msg.no_target_title": "Sem alvo",
         "msg.monitor_off": "Observador desligado para não disputar CPU.",
         "msg.purged": "Removidos do catálogo por serem erro de leitura: {names}",
@@ -295,10 +293,9 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "en": {
         "app.title": "d4forge",
-        "app.subtitle": "Enchanting — Diablo IV",
+        "app.subtitle": "Enchanting & Tempering — Diablo IV",
         "app.window": "d4forge",
-        "tab.panel": "Panel",
-        "tab.target": "Target",
+        "tab.enchant": "Enchant",
         "tab.catalog": "Catalog",
         "panel.idle": "Idle",
         "panel.running": "Running",
@@ -331,7 +328,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "movement and cost up to 0.8 s per round."
         ),
         "panel.attempts_done": "{count} attempt(s) in {seconds:.0f}s",
-        "target.box": "Stop when this shows up",
+        "target.box": "Target — stop when this shows up",
         "target.slot": "Slot",
         "target.slot_all": "All",
         "target.slot_tip": "Filters affixes by the slot you are enchanting.",
@@ -357,7 +354,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "target.unit_flat": "points",
         "target.unit_percent": "%",
         "target.unit_rank": "ranks",
-        "target.hint": "The Occultist rerolls one affix at a time, so there is a single target.",
         "catalog.hint": (
             "Fill min/max to use the roll criterion. Slots separated by commas; "
             "empty means every slot."

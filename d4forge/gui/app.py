@@ -195,8 +195,9 @@ class MainWindow(FramelessMixin, QMainWindow):
         corpo_layout.setContentsMargins(18, 12, 18, 16)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_panel(), t("tab.panel"))
-        self.tabs.addTab(self._build_target(), t("tab.target"))
+        # Uma aba por fluxo — Enchant e Tempering —, cada uma com o alvo, os
+        # limites e o progresso dela. O Catálogo é dos dois, então fica fora.
+        self.tabs.addTab(self._build_panel(), t("tab.enchant"))
         self.tabs.addTab(self._build_temper(), t("tab.temper"))
         self.tabs.addTab(self._build_catalog(), t("tab.catalog"))
         # A tabela do catálogo tem ~880 linhas: montá-la só quando alguém abre a
@@ -326,8 +327,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         try:
             while self.tabs.count():
                 self.tabs.removeTab(0)
-            self.tabs.addTab(self._build_panel(), t("tab.panel"))
-            self.tabs.addTab(self._build_target(), t("tab.target"))
+            self.tabs.addTab(self._build_panel(), t("tab.enchant"))
             self.tabs.addTab(self._build_temper(), t("tab.temper"))
             # A aba do catálogo é a MESMA de antes, só com os rótulos trocados:
             # o conteúdo dela não depende de idioma.
@@ -395,6 +395,8 @@ class MainWindow(FramelessMixin, QMainWindow):
         dica.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dica.setProperty("role", "accent")
         layout.addWidget(dica)
+
+        layout.addWidget(self._build_target())
 
         cartoes = QHBoxLayout()
         cartoes.setSpacing(12)
@@ -469,14 +471,12 @@ class MainWindow(FramelessMixin, QMainWindow):
 
     # --------------------------------------------------------------- alvo
     def _build_target(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setSpacing(12)
+        """O alvo como CARTAO dentro do Enchant, e nao como aba separada.
 
-        hint = QLabel(t("target.hint"))
-        hint.setProperty("role", "hint")
-        layout.addWidget(hint)
-
+        O Occultist troca um afixo por vez, entao o alvo e' um so' - e escolher
+        o alvo e apertar Iniciar sao partes do mesmo gesto. Em abas separadas,
+        conferir o que estava configurado exigia ir e voltar.
+        """
         box = QGroupBox(t("target.box"))
         form = QVBoxLayout(box)
         form.setSpacing(10)
@@ -544,17 +544,17 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.chk_climb.setChecked(True)
         self.chk_climb.setToolTip(t("target.climb_tip"))
         form.addWidget(self.chk_climb)
-        layout.addWidget(box)
 
+        rodape = QHBoxLayout()
         self.lbl_target_summary = QLabel("")
         self.lbl_target_summary.setProperty("role", "hint")
-        layout.addWidget(self.lbl_target_summary)
-
+        self.lbl_target_summary.setWordWrap(True)
+        rodape.addWidget(self.lbl_target_summary, 1)
         salvar = QPushButton(t("target.save"))
         salvar.clicked.connect(self._save_target)
-        layout.addWidget(salvar)
-        layout.addStretch(1)
-        return page
+        rodape.addWidget(salvar)
+        form.addLayout(rodape)
+        return box
 
     def _refresh_affix_choices(self, *_args) -> None:
         atual = self.cmb_affix.currentText()

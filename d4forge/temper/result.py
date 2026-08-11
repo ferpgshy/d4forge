@@ -140,7 +140,6 @@ def read_text_lines(frame: np.ndarray, roi: Rect, ocr, ui_scale: float = 1.0) ->
 # Um numero, com separador de milhar ou decimal: "8.4", "2,404", "1,500".
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 # O valor sorteado: primeiro numero com sinal na frente ("+8.4%", "+1,738").
-_VALUE = re.compile(r"[+-]\s*([\d.,]+)")
 
 
 def _number(texto: str) -> float | None:
@@ -185,6 +184,9 @@ class TemperResult:
     value: float | None = None
     low: float | None = None
     high: float | None = None
+    # O jogo mostrou uma faixa que nao conseguimos montar. Nao sabemos os
+    # limites, mas sabemos o que basta: nao e' Greater Affix.
+    range_hidden: bool = False
 
     @property
     def has_range(self) -> bool:
@@ -211,9 +213,19 @@ class TemperResult:
         return True
 
     @property
+    def bracketed(self) -> bool:
+        """A linha tem colchete, mesmo que nao tenhamos lido o intervalo dele.
+
+        Colchete e' EVIDENCIA de que o jogo mostrou uma faixa. Quando ele
+        aparece e mesmo assim nao conseguimos montar o intervalo, o que houve
+        foi falha de leitura - nao ausencia de faixa.
+        """
+        return "[" in self.raw or "]" in self.raw
+
+    @property
     def greater(self) -> bool:
-        """Greater Affix: veio o valor e o jogo NAO mostrou intervalo."""
-        return self.readable and not self.has_range
+        """Greater Affix: veio o valor e o jogo NAO mostrou faixa nenhuma."""
+        return self.readable and not self.has_range and not self.range_hidden
 
     @property
     def fraction(self) -> float | None:
@@ -222,33 +234,45 @@ class TemperResult:
             return None
         return (self.value - self.low) / (self.high - self.low)
 
-    def corroborated(self, known: tuple[float, float] | None) -> "TemperResult":
-        """Confere um "GA" contra o intervalo que a receita ja' mostrou.
+    def corroborated(self, known: tuple[float, float] | None = None) -> "TemperResult":
+        """Decide, para uma linha sem intervalo montado, se ela e' Greater Affix.
 
-        A receita nao muda no meio da sessao, entao o intervalo lido numa
-        tentativa anterior vale para todas. Isso da' um segundo voto sobre a
-        unica leitura que encerra o ciclo:
+        Quem responde e' o COLCHETE, nao o numero.
 
-            valor ACIMA do maximo conhecido  -> GA de verdade
-            valor DENTRO do intervalo        -> o intervalo existia e nao foi
-                                                lido; e' roll comum
+        Colchete e' uma PRESENCA, e presenca nao depende de acertar digito: se
+        ele esta' na linha, o jogo mostrou uma faixa, logo nao e' GA - mesmo
+        que o intervalo tenha saido ilegivel. Se nao esta', e' assim que o jogo
+        escreve um GA ("+10.0% Attack Speed", "7.5% Cooldown Reduction").
 
-        E' o que faltava no caso real: com "[1,500 - 2,500]" na tela, um
-        "+2,404" sem intervalo foi tomado por Greater Affix e encerrou a
-        sessao - sendo que 2.404 cabe folgadamente dentro de 1.500 a 2.500.
+        Isso cobre os dois erros vistos no jogo, que puxavam para lados opostos:
+
+            "[5 - 12]" lido como "[52]"        -> colchete presente, nao e' GA
+            "+50.0% Damage with ... Weapons"   -> sem colchete, E' GA
+
+        `known` nao entra mais nessa decisao, de proposito. Comparar o valor
+        com o teto da receita so' sabe SUPRIMIR um GA, e para isso precisa do
+        teto certo - que e' justamente o que o OCR erra: "[20.0 - 40.0]%" saia
+        como "[20.0 - 401%" (o "]" virando "1") rodada apos rodada, ate' virar
+        maioria. Com o teto em 401, um "+50.0%" legitimo foi julgado dentro da
+        faixa e o ciclo ia rolar por cima dele - o erro que destroi o item. O
+        parametro fica na assinatura porque a faixa conhecida continua util
+        para o criterio de fracao.
         """
-        if known is None or self.has_range or self.value is None:
+        if self.has_range or self.value is None:
             return self
-        low, high = known
-        if self.value > high:
-            return self
-        return TemperResult(raw=self.raw, value=self.value, low=low, high=high)
+        if self.bracketed:
+            return TemperResult(raw=self.raw, value=self.value, range_hidden=True)
+        return self
 
     def describe(self) -> str:
         if not self.readable:
             return self.raw or "?"
         if self.greater:
             return f"{self.value:g}  GA"
+        if not self.has_range:
+            # Havia faixa na tela, mas ela nao foi lida. Dizer isso e' melhor
+            # do que mostrar um intervalo inventado.
+            return f"{self.value:g}  [?]"
         return f"{self.value:g}  [{self.low:g} - {self.high:g}]"
 
 
@@ -288,7 +312,7 @@ def _find_range(texto: str):
         for m in _NUMBER.finditer(texto)
     ]
     melhor = None
-    for (_, fim_a, a), (ini_b, _, b) in zip(numeros, numeros[1:]):
+    for (ini_a, fim_a, a), (ini_b, _, b) in zip(numeros, numeros[1:]):
         # `a <= b`, e nao `a < b`. Um intervalo de verdade sempre tem low
         # menor que high, entao `low == high` so' aparece quando o OCR comeu um
         # digito - e aceitar mesmo assim e' o lado seguro, porque significa
@@ -300,7 +324,11 @@ def _find_range(texto: str):
         if a is None or b is None or not (a <= b):
             continue
         if _is_separator(texto[fim_a:ini_b]):
-            melhor = (a, b, fim_a)
+            # Onde o intervalo COMECA, nao onde o primeiro numero dele termina:
+            # e' o corte usado para procurar o valor, e incluir o proprio
+            # limite inferior faria "Something [1,500 - 2,500]" render 1.500
+            # como se fosse o roll.
+            melhor = (a, b, ini_a)
     return melhor
 
 
@@ -312,9 +340,14 @@ def parse_temper_result(texto: str) -> TemperResult:
     if intervalo:
         low, high, corte = intervalo
 
-    # O valor vem antes do intervalo na frase; procurar so' nesse trecho evita
-    # capturar um numero de dentro dos colchetes.
-    achado = _VALUE.search(texto[:corte])
-    value = _number(achado.group(1)) if achado else None
+    # O valor e' o PRIMEIRO numero da frase, e o trecho olhado termina onde o
+    # intervalo comeca - senao pegariamos o limite inferior dele.
+    #
+    # Nao exigimos sinal na frente. Exigir custou uma sessao: "4.1% Cooldown
+    # Reduction [3.0 - 6.0]%" nao tem "+", assim como "x25% Critical Strike
+    # Damage Multiplier". O valor ficava None, a leitura era dada como
+    # duvidosa e o ciclo parava - com o texto lido corretamente na tela.
+    primeiro = _NUMBER.search(texto[:corte])
+    value = _number(primeiro.group()) if primeiro else None
 
     return TemperResult(raw=texto.strip(), value=value, low=low, high=high)

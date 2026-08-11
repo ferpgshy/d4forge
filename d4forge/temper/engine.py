@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -117,10 +118,9 @@ class TemperEngine:
         # total da rajada. Ambos zeram quando o ciclo consegue temperar.
         self._dead = 0
         self._burst = 0
-        # Intervalo que a receita ja' mostrou nesta sessao. A receita nao muda
-        # no meio do caminho, entao ele serve de segundo voto sobre a unica
-        # leitura que encerra o ciclo - ver TemperResult.corroborated.
-        self._known_range: tuple[float, float] | None = None
+        # Intervalos que a receita ja' mostrou nesta sessao, com quantas vezes
+        # cada um apareceu - ver `_known_range`.
+        self._range_votes: Counter[tuple[float, float]] = Counter()
 
     # -- infraestrutura ---------------------------------------------------
     def cancel(self) -> None:
@@ -243,8 +243,31 @@ class TemperEngine:
             texto = read_text_lines(frame, prof.result_text, self.ocr, prof.scale)
         lido = parse_temper_result(texto)
         if lido.has_range:
-            self._known_range = (lido.low, lido.high)
+            self._range_votes[(lido.low, lido.high)] += 1
         return lido.corroborated(self._known_range)
+
+    # Leituras concordantes exigidas para um intervalo virar referencia.
+    RANGE_VOTES_NEEDED = 2
+
+    @property
+    def _known_range(self) -> tuple[float, float] | None:
+        """O intervalo da receita, decidido por VOTO e nao pela primeira vista.
+
+        A receita nao muda no meio da sessao, entao o mesmo intervalo aparece
+        dezenas de vezes e uma leitura torta e' minoria. Confiar na primeira
+        custou um Greater Affix no jogo: "[20.0 - 40.0]%" saiu como
+        "[20.0 - 401%" - o "]" virou "1" -, o teto virou 401, e quando o
+        "+50.0%" apareceu sem intervalo a corroboracao concluiu que 50 cabia
+        dentro de 401 e mandou continuar rolando por cima dele.
+
+        Enquanto nao houver duas leituras concordando, e' melhor nao ter
+        referencia nenhuma: sem ela a decisao cai na presenca de colchete, que
+        nao depende de acertar numero.
+        """
+        if not self._range_votes:
+            return None
+        faixa, votos = self._range_votes.most_common(1)[0]
+        return faixa if votos >= self.RANGE_VOTES_NEEDED else None
 
     def _read_result_settled(self, frame: np.ndarray, prof) -> TemperResult:
         """Le' o afixo, esperando a tela acabar de aparecer."""
@@ -273,6 +296,7 @@ class TemperEngine:
         self._cancel.clear()
         self.recharges = 0
         self._burst = self._dead = 0
+        self._range_votes.clear()
 
         def fim(found: bool, key: str, **params) -> TemperOutcome:
             return TemperOutcome(

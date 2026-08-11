@@ -359,6 +359,62 @@ def test_desiste_se_o_afixo_nunca_aparece(roteiro, monkeypatch):
     assert resultado.reason_key == "temper.unreadable_stop"
 
 
+def test_intervalo_torto_nao_envenena_a_sessao(roteiro, monkeypatch):
+    """A regressão mais cara: o ciclo ia rolar por cima de um Greater Affix.
+
+    Na sessão real, `[20.0 - 40.0]%` saiu como `[20.0 - 401%` — o `]` virou
+    `1`. O teto passou a ser 401. Quando o `+50.0%` apareceu SEM intervalo (um
+    GA de verdade), a corroboração viu que 50 cabia dentro de 401 e mandou
+    continuar rolando.
+
+    A receita não muda no meio da sessão, então o intervalo certo aparece
+    dezenas de vezes e a leitura torta é minoria. Vale o mais repetido, não o
+    primeiro visto."""
+    engine, _ = roteiro(
+        ["temper_idle", "temper_animation", "temper_result_ga"],
+        TemperGoal(require_greater=True),
+        limits=TemperLimits(max_attempts=6, max_minutes=None),
+    )
+
+    # Troca o TEXTO lido, não o resultado: assim a contagem de votos e a
+    # corroboração do motor rodam de verdade.
+    # A ordem importa e é a da sessão real: a leitura torta vem por ÚLTIMO,
+    # logo antes do GA. Guardar "o intervalo mais recente" — que era o que o
+    # código fazia — deixaria 401 valendo justamente na hora de decidir.
+    leituras = iter([
+        "+30.0% Damage [20.0 - 40.0]%",
+        "+35.0% Damage [20.0 - 40.0]%",
+        "+26.0% Damage [20.0 - 401%",     # o `]` virou `1`
+        "+50.0% Damage with Two-Handed Slashing Weapons",   # GA de verdade
+    ])
+    monkeypatch.setattr(
+        "d4forge.temper.engine.read_text_lines",
+        lambda *a, **k: next(leituras, "+50.0% Damage with Two-Handed Slashing Weapons"),
+    )
+
+    resultado = engine.run()
+
+    assert resultado.found, resultado.reason
+    assert resultado.reason_key == "temper.got_ga"
+    assert resultado.attempts[-1].result.value == 50.0
+    # E a referência usada foi a majoritária, não a última vista.
+    assert engine._known_range == (20.0, 40.0)
+    assert engine._range_votes[(20.0, 401.0)] == 1
+
+
+def test_um_intervalo_visto_uma_vez_so_nao_vira_referencia(roteiro):
+    """Enquanto não houver duas leituras concordando, é melhor não ter
+    referência: sem ela a decisão cai na presença de colchete, que não depende
+    de acertar número."""
+    engine, _ = roteiro(["temper_idle"], TemperGoal(require_greater=True))
+
+    engine._range_votes[(20.0, 401.0)] = 1
+    assert engine._known_range is None
+
+    engine._range_votes[(20.0, 40.0)] = 2
+    assert engine._known_range == (20.0, 40.0), "o mais repetido vence"
+
+
 def test_resultado_ilegivel_para_o_ciclo(roteiro, monkeypatch, temper_shots):
     """A trava mais importante daqui. Se não dá para ler o que saiu, continuar
     rolaria por cima de um resultado que pode ser justamente o GA."""

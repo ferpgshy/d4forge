@@ -449,6 +449,35 @@ def test_intervalo_com_digito_comido_ainda_conta_como_intervalo():
     assert TemperGoal(require_greater=True).accepts(r)[1] == "temper.keep_rolling"
 
 
+@pytest.mark.parametrize("texto,valor", [
+    # Sem sinal nenhum — o caso que parou uma sessão com o texto lido certo.
+    ("4.1% Cooldown Reduction [3.0 - 6.0]%", 4.1),
+    ("6.0% Cooldown Reduction", 6.0),
+    # Multiplicador: começa com "x".
+    ("x25% Critical Strike Damage Multiplier [13 - 25]%", 25),
+    # E os que já levam "+" continuam valendo.
+    ("+2,404 Poison Resistance [1,500 - 2,500]", 2404),
+    ("+1 to Brawling Skills [1 - 2]", 1),
+])
+def test_valor_nao_depende_de_sinal_na_frente(texto, valor):
+    """Nem todo afixo escreve "+" antes do número.
+
+    Exigir o sinal fazia o valor sair como None, a leitura ser dada como
+    duvidosa e o ciclo parar — com a linha lida corretamente na tela, o que
+    torna o defeito especialmente confuso de diagnosticar."""
+    r = parse_temper_result(texto)
+    assert r.value == valor
+    assert r.readable
+
+
+def test_valor_e_o_primeiro_numero_e_nao_o_do_intervalo():
+    """Se o valor fosse buscado na frase inteira, um afixo sem sinal pegaria o
+    limite inferior do intervalo em vez do roll."""
+    r = parse_temper_result("4.1% Cooldown Reduction [3.0 - 6.0]%")
+    assert r.value == 4.1
+    assert (r.low, r.high) == (3.0, 6.0)
+
+
 def test_intervalo_e_o_ultimo_par_da_linha():
     """O meio da frase também tem números. Em "…for 2 Seconds [5.0 - 10.0]%[2]",
     o par (2, 5.0) casa com o padrão tão bem quanto o verdadeiro — e o sufixo
@@ -461,25 +490,75 @@ def test_intervalo_e_o_ultimo_par_da_linha():
     assert r.value == 8.4
 
 
-def test_ga_confirmado_contra_o_intervalo_ja_visto():
-    """Segunda trava sobre a única leitura que encerra o ciclo.
+def test_o_colchete_decide_e_nao_o_numero():
+    """O veredito de Greater Affix não pode depender de acertar dígito.
 
-    A receita não muda no meio da sessão, então o intervalo lido antes vale
-    para as tentativas seguintes. Um "GA" cujo valor cabe dentro dele é leitura
-    falha, não Greater Affix."""
-    conhecido = (1500.0, 2500.0)
+    Comparar o valor com o teto da receita já esteve aqui e teve de sair: o
+    teto é justamente o que o OCR erra. `[20.0 - 40.0]%` saía como
+    `[20.0 - 401%` — o `]` virando `1` — rodada após rodada, até virar
+    maioria. Com o teto em 401, um `+50.0%` legítimo foi julgado dentro da
+    faixa e o ciclo ia rolar por cima dele.
 
-    falso = parse_temper_result("+2,404 Poison Resistance").corroborated(conhecido)
-    assert not falso.greater
-    assert (falso.low, falso.high) == conhecido
+    Colchete é presença, e presença não depende de dígito."""
+    for faixa in (None, (20.0, 401.0), (20.0, 40.0), (1500.0, 2500.0)):
+        ga = parse_temper_result(
+            "+50.0% Damage with Tw : Handed Slashing Weapons"
+        ).corroborated(faixa)
+        assert ga.greater, f"faixa conhecida {faixa} não pode suprimir um GA"
 
-    real = parse_temper_result("+3,125 Poison Resistance").corroborated(conhecido)
-    assert real.greater, "acima do máximo conhecido é GA de verdade"
+        comum = parse_temper_result(
+            "+23.0% Damage with Two-H Jed Slashing Weapons [20.0 - 4%"
+        ).corroborated(faixa)
+        assert not comum.greater, f"há colchete: não é GA, faixa {faixa}"
 
 
 def test_sem_intervalo_conhecido_a_leitura_vale_como_esta():
     """Na primeira tentativa da sessão não há com o que corroborar."""
     r = parse_temper_result("+3,125 Poison Resistance").corroborated(None)
+    assert r.greater
+
+
+def test_colchete_sem_intervalo_montado_nao_e_ga():
+    """A primeira rodada da sessão é a única desprotegida: não há intervalo
+    anterior com que comparar. E foi lá que o erro apareceu no jogo.
+
+    A tela mostrava `[5 - 12]` numa linha separada e o OCR devolveu `[52]` —
+    o traço sumiu e os números colaram. Sem traço não há intervalo, e ausência
+    de intervalo é o que este código chama de GA.
+
+    O colchete é evidência de que o jogo mostrou uma faixa. Quando ele aparece
+    e mesmo assim não montamos o intervalo, houve falha de leitura — não
+    ausência de faixa."""
+    lido = ("Lucky Hit: Up to a 15% Chance :: Restore +5 Primary Resource [52]")
+    r = parse_temper_result(lido).corroborated(None)
+
+    assert not r.greater, "colchete na linha: havia faixa, a leitura é que falhou"
+    assert r.range_hidden
+    assert r.readable, "o valor foi lido; dá para seguir rolando"
+    assert r.value == 15
+
+
+@pytest.mark.parametrize("texto", [
+    "7.5% Cooldown Reduction",
+    "+10.0% Attack Speed",
+    "+3,125 Lightning Resistance",
+])
+def test_ga_de_verdade_nao_tem_colchete_nenhum(texto):
+    """A contrapartida: é assim que o jogo escreve um Greater Affix. Sem
+    colchete na linha, a ausência de intervalo é real."""
+    r = parse_temper_result(texto).corroborated(None)
+    assert r.greater
+    assert not r.bracketed
+
+
+def test_nome_ilegivel_sem_colchete_ainda_conta_como_ga():
+    """`3.4% Cooldr*.. n Reduction` tem o nome destruído mas nenhum colchete.
+
+    Antes o valor era comparado com a faixa da receita e isso o rebaixava a
+    roll comum. Hoje não: a decisão é estrutural, então uma linha sem colchete
+    encerra a sessão e você confere o item — o erro barato. O caro seria o
+    contrário."""
+    r = parse_temper_result("3.4% Cooldr*.. n Reduction").corroborated((3.0, 6.0))
     assert r.greater
 
 

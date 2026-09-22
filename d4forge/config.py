@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
@@ -46,6 +46,14 @@ TIMINGS_PATH = DATA_DIR / "timings.json"
 class Settings:
     # -- interface --------------------------------------------------------
     language: str = "pt-BR"
+
+    # Posicao, tamanho, monitor e estado maximizado da janela, como o Qt os
+    # serializa (`saveGeometry`) e em base64 para caber no JSON.
+    #
+    # Vazio na primeira execucao: ai a janela se encaixa na tela sozinha, em
+    # vez de abrir num tamanho fixo que passava da altura util em monitores
+    # 1080p - metade dela, botao de fechar incluso, nascia fora do alcance.
+    window_geometry: str = ""
 
     # -- seguranca --------------------------------------------------------
     # Simulacao continua existindo no engine (e os testes usam), mas saiu da

@@ -10,7 +10,6 @@ Medido em 111 rodadas reais do usuário: o jogo reage em ~80 ms, p95 155 ms,
 máximo 173 ms. Uma travada de 8 s depois disso é puro desperdício.
 """
 
-import time
 
 import pytest
 

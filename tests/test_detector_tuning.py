@@ -12,7 +12,12 @@ multiplicada por 7 e o detector processava 4670x736 para ler uma linha.
 
 import pytest
 
-from d4forge.vision.ocr import DET_LIMIT_SIDE, RapidOcrBackend, _tune_detector
+from d4forge.vision.ocr import (
+    DET_LIMIT_SIDE,
+    RapidOcrBackend,
+    _onde_ficam_os_limites,
+    _tune_detector,
+)
 
 
 @pytest.fixture(scope="module")
@@ -22,11 +27,10 @@ def engine():
 
 
 def test_detector_nao_infla_a_imagem(engine):
-    ops = [op for op in engine.text_detector.preprocess_op if hasattr(op, "limit_type")]
-    assert ops, "detector sem operação de resize reconhecível"
-    for op in ops:
-        assert op.limit_type == "max"
-        assert op.limit_side_len == DET_LIMIT_SIDE
+    alvo = _onde_ficam_os_limites(engine)
+    assert alvo is not None, "detector sem operação de resize reconhecível"
+    assert alvo.limit_type == "max"
+    assert alvo.limit_side_len == DET_LIMIT_SIDE
 
 
 def test_ajuste_e_idempotente(engine):
@@ -52,3 +56,38 @@ def test_ajuste_nao_quebra_com_estrutura_desconhecida():
         text_detector = object()
 
     assert _tune_detector(Fake()) is False
+
+
+class _Botoes:
+    limit_type = "min"
+    limit_side_len = 736
+
+
+def test_acha_os_botoes_no_formato_antigo():
+    """Até a 1.3 eles ficavam numa lista de operações de pré-processamento."""
+
+    class Detector:
+        preprocess_op = [object(), _Botoes()]
+
+    class Engine:
+        text_detector = Detector()
+
+    engine = Engine()
+    assert _tune_detector(engine)
+    assert engine.text_detector.preprocess_op[1].limit_type == "max"
+
+
+def test_acha_os_botoes_no_formato_novo():
+    """Regressão real: a 1.4 renomeou `text_detector` para `text_det` e trouxe
+    os botões para o próprio detector. A busca falhava em silêncio, o detector
+    voltava a inflar a imagem 7x e `+1,431 Maximum Life` era lido como
+    `+1. 1,431` — valor 1.1431 em vez de 1431, com o motor decidindo em cima
+    disso."""
+
+    class Engine:
+        text_det = _Botoes()
+
+    engine = Engine()
+    assert _tune_detector(engine)
+    assert engine.text_det.limit_type == "max"
+    assert engine.text_det.limit_side_len == DET_LIMIT_SIDE

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..i18n import t
 from ..temper.rules import Recharge, TemperGoal
+from .responsive import LinhaAdaptavel
 from .temper_panel import TemperProgressPanel
 
 
@@ -46,11 +47,13 @@ class TemperTab(QWidget):
         self.lbl_hint.setProperty("role", "hint")
         raiz.addWidget(self.lbl_hint)
 
-        cartoes = QHBoxLayout()
-        cartoes.setSpacing(12)
-        cartoes.addWidget(self._build_goal(), 1)
-        cartoes.addWidget(self._build_recharge(), 1)
-        raiz.addLayout(cartoes)
+        # Lado a lado enquanto couberem os dois, empilhados quando nao: a
+        # meia largura, os radios com campo ao lado ficavam sem espaco para o
+        # campo e o numero sumia atras das setas.
+        cartoes = LinhaAdaptavel(espaco=12)
+        cartoes.add(self._build_goal(), 1)
+        cartoes.add(self._build_recharge(), 1)
+        raiz.addWidget(cartoes)
 
         # Linha de estado, e nao so' o painel.
         #

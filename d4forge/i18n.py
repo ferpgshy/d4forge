@@ -27,6 +27,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "app.title": "d4forge",
         "app.subtitle": "Encantamento, Tempering e Masterworking — Diablo IV",
         "app.window": "d4forge",
+        # -- botões da janela (os que a barra nativa daria prontos)
+        "window.minimize": "Minimizar",
+        "window.maximize": "Maximizar",
+        "window.restore": "Restaurar",
+        "window.close": "Fechar",
         # -- abas
         "tab.enchant": "Enchant",
         "tab.catalog": "Catálogo",
@@ -75,7 +80,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "target.min_roll_suffix": " % do máximo",
         "target.min_roll_ignore": "ignorar",
         "target.min_roll_tip": "Precisa de mín/máx preenchidos no Catálogo.",
-        "target.climb": "Subir aos poucos: pega o afixo com qualquer valor e só troca por valores maiores",
+        # O rótulo curto, e a explicação numa linha à parte que QUEBRA. Um
+        # QCheckBox não quebra texto: a frase inteira virava a largura mínima
+        # da aba, e era ela quem obrigava a janela a ter uma barra de rolagem
+        # horizontal antes de qualquer outra coisa apertar.
+        "target.climb": "Subir aos poucos",
+        "target.climb_hint": (
+            "Pega o afixo com qualquer valor e só troca por valores maiores."
+        ),
         "target.climb_tip": (
             "Enquanto a peça não tem o afixo, aceita qualquer valor. Depois só "
             "aceita valor maior, até a meta."
@@ -345,6 +357,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "app.title": "d4forge",
         "app.subtitle": "Enchanting, Tempering & Masterworking — Diablo IV",
         "app.window": "d4forge",
+        "window.minimize": "Minimize",
+        "window.maximize": "Maximize",
+        "window.restore": "Restore",
+        "window.close": "Close",
         "tab.enchant": "Enchant",
         "tab.catalog": "Catalog",
         "panel.idle": "Idle",
@@ -390,7 +406,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "target.min_roll_suffix": " % of max",
         "target.min_roll_ignore": "ignore",
         "target.min_roll_tip": "Needs min/max filled in the Catalog.",
-        "target.climb": "Climb: take the affix at any value, then only swap for higher ones",
+        "target.climb": "Climb",
+        "target.climb_hint": (
+            "Takes the affix at any value, then only swaps for higher ones."
+        ),
         "target.climb_tip": (
             "While the item lacks the affix, any value is taken. After that, "
             "only a higher value is accepted, up to the goal."

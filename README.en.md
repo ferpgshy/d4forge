@@ -234,6 +234,60 @@ lighting up.
 - **Sorting the detector boxes is mandatory** — it returns them in arbitrary
   order, and joining them as they arrive turned `+4 Energy` into `Energy +4`.
 
+### Dropping the title bar costs more than it looks
+
+The window has no Windows frame, so it doesn't clash with the game beside it.
+The first version hand-rolled what the frame used to give: dragging and
+resizing, answering `mouseMoveEvent`. The result was a window that **moved**,
+and nothing else — it did not snap at the screen edge, did not obey Win+Arrow,
+showed no resize cursor, never opened Snap Layouts, had no shadow.
+
+The right way is the opposite of what it looks like: instead of removing the
+frame, **keep it and erase only its drawing**. The window keeps
+`WS_THICKFRAME | WS_CAPTION` — every gesture comes from those — and returns zero
+from `WM_NCCALCSIZE`, which makes the client area cover the whole window. From
+there it is just answering `WM_NCHITTEST`: `HTCAPTION` over the header strip,
+`HT*` on the edges, `HTMAXBUTTON` over the maximize button (that is what lights
+up Snap Layouts). Chrome, VS Code and Windows Terminal all do it this way. It
+lives in `gui/win32frame.py`.
+
+Two traps along the way:
+
+- **When maximized, Windows stretches the window past the screen** by the frame
+  thickness — which would be invisible, if there were a frame. Without
+  subtracting that in `WM_NCCALCSIZE`, the UI bleeds off all four monitor edges
+  and spills onto the next monitor. And if the taskbar auto-hides, one pixel
+  must be left free on its edge or it never pops back up.
+- **`maximized` is already a QWidget property, and a read-only one.**
+  `setProperty("maximized", True)` creates no dynamic property at all: it fails
+  silently, and the stylesheet rule `[maximized="true"]` never matches. Same for
+  `minimized` and `fullScreen`.
+
+### A layout that cannot shrink is not responsive, it is rigid
+
+The window demanded 880 px of width and opened 840 px tall — taller than the
+work area of a 1080p monitor, so it was born with part of itself out of reach.
+A minimum smaller than what the layout needs does not make the layout shrink; it
+only lets the widgets overlap.
+
+Three remedies, in `gui/responsive.py`:
+
+- **Every tab scrolls.** A scroll area's minimum is its own, not that of the
+  page inside it — that is what took the window minimum from 880 down to 520.
+- **Side-by-side cards become a column** below the width where both fit whole,
+  with hysteresis so the layout does not flicker mid-drag. The subtle part is
+  the row reporting the COLUMN width as its minimum even while in a row:
+  reporting the row's width reserved it forever, and the very flip meant to
+  avoid the horizontal scrollbar could never happen.
+- **Stretching without a ceiling is as bad as not stretching.** Maximized on a
+  1920 monitor, the window gave 1230 px to the "Start" button and 750 to a
+  three-digit box.
+
+And what pins a minimum width the hardest is **text that does not wrap**: a
+`QCheckBox` never wraps, however nicely you ask. That is why the explanation for
+"Climb" moved out of the checkbox and became a line of its own. A test sweeps
+the tabs for long labels without wrapping.
+
 ---
 
 ## Affix catalog

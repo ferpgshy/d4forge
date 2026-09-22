@@ -23,7 +23,7 @@ from d4forge.profile import (
     REFERENCE_HEIGHT,
     REFERENCE_WIDTH,
 )
-from d4forge.vision.states import ScreenState, detect_state
+from d4forge.vision.states import detect_state
 
 # As quatro que o usuário pediu.
 DEZESSEIS_NOVE = [

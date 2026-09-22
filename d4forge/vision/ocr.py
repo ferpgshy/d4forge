@@ -29,7 +29,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -243,6 +243,43 @@ class OcrStats:
 DET_LIMIT_SIDE = 1280
 
 
+# Onde o detector mora dentro do RapidOCR. A 1.4 renomeou `text_detector` para
+# `text_det`, e `requirements.txt` nunca prendeu a versao: quem instalasse hoje
+# recebia uma estrutura que este arquivo nao reconhecia. Como a busca falhava
+# em SILENCIO - so' um aviso no log -, o detector seguia no padrao e voltava a
+# inflar a imagem, que e' exatamente o defeito que esta funcao existe para
+# impedir. `+1,431 Maximum Life` saia como `+1. 1,431` e virava 1.1431.
+ATRIBUTOS_DO_DETECTOR = ("text_detector", "text_det")
+
+
+def _tem_limites(alvo) -> bool:
+    return hasattr(alvo, "limit_type") and hasattr(alvo, "limit_side_len")
+
+
+def _onde_ficam_os_limites(engine):
+    """O objeto que carrega `limit_type`/`limit_side_len`, ou None.
+
+    Sao dois formatos, e o codigo aceita os dois porque nao manda na versao
+    instalada: ate' a 1.3 os botoes ficavam numa lista de operacoes de
+    pre-processamento; da 1.4 em diante estao no proprio detector.
+    """
+    try:
+        for nome in ATRIBUTOS_DO_DETECTOR:
+            detector = getattr(engine, nome, None)
+            if detector is None:
+                continue
+            if _tem_limites(detector):
+                return detector
+            operacoes = getattr(detector, "preprocess_op", None)
+            if isinstance(operacoes, (list, tuple)):
+                for op in operacoes:
+                    if _tem_limites(op):
+                        return op
+    except Exception:  # noqa: BLE001 - versao nova pode mudar tudo de lugar
+        log.exception("erro procurando os limites do detector")
+    return None
+
+
 def _tune_detector(engine) -> bool:
     """Impede o detector de inflar a imagem.
 
@@ -258,17 +295,19 @@ def _tune_detector(engine) -> bool:
     Medido nos recortes reais: 1951 ms -> 70 ms por linha (28x), e a precisao
     subiu de 4/5 para 5/5 - a imagem inflada tambem atrapalhava o modelo.
     """
-    try:
-        for op in getattr(engine.text_detector, "preprocess_op", []):
-            if hasattr(op, "limit_type") and hasattr(op, "limit_side_len"):
-                op.limit_type = "max"
-                op.limit_side_len = DET_LIMIT_SIDE
-                return True
-    except Exception as exc:  # noqa: BLE001 - versao nova pode mudar a estrutura
-        log.warning("nao consegui ajustar o detector (%s); segue no padrao", exc)
-    else:
-        log.warning("detector sem limit_type conhecido; segue no padrao")
-    return False
+    alvo = _onde_ficam_os_limites(engine)
+    if alvo is None:
+        # Grito, e nao sussurro: sem este ajuste o app continua ABRINDO e
+        # lendo, so' que devagar e errado - o pior tipo de defeito que existe.
+        log.warning(
+            "NAO achei os limites do detector do RapidOCR (versao nova?). "
+            "Ele vai inflar cada linha ~7x: leitura lenta E com erro de "
+            "digito. Ver _tune_detector em vision/ocr.py."
+        )
+        return False
+    alvo.limit_type = "max"
+    alvo.limit_side_len = DET_LIMIT_SIDE
+    return True
 
 
 class RapidOcrBackend:

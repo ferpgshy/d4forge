@@ -156,8 +156,6 @@ def test_sujeira_na_frente_nao_derruba_a_leitura(prefixo, catalog):
 
 def test_leitura_com_sujeira_casa_com_o_alvo(mw_shots, ocr, catalog):
     """O caminho inteiro, e não só as peças: sujeira na frente, leitura, alvo."""
-    import numpy as np
-
     from d4forge.masterwork.result import read_masterwork_affix
 
     img = mw_shots["mw_affix"]

@@ -131,6 +131,9 @@ class ProgressPanel(QGroupBox):
         self.vazio = QLabel(t("progress.empty"))
         self.vazio.setProperty("role", "hint")
         self.vazio.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Quebra em vez de fixar a largura: numa linha so' esta frase era o
+        # rotulo mais largo do painel, e portanto o piso da largura da aba.
+        self.vazio.setWordWrap(True)
         raiz.addWidget(self.vazio)
 
         self.btn_detalhes = QToolButton()
@@ -148,7 +151,14 @@ class ProgressPanel(QGroupBox):
         self.detalhes = QPlainTextEdit()
         self.detalhes.setReadOnly(True)
         self.detalhes.setMaximumBlockCount(3000)
-        self.detalhes.setFixedHeight(110)
+        # Altura fixa virava um bloco morto quando a janela crescia e um bloco
+        # grande demais quando ela encolhia. A faixa deixa o painel respirar
+        # sem nunca comer a tabela, que e' o que veio mostrar.
+        self.detalhes.setMinimumHeight(90)
+        self.detalhes.setMaximumHeight(260)
+        self.detalhes.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.detalhes.setVisible(False)
         raiz.addWidget(self.detalhes)
 

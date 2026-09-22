@@ -25,7 +25,6 @@ Regras de conducao:
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -48,12 +47,6 @@ from .vision.states import ScreenState, detect_state, selected_orb
 from .window import find_game_window
 
 log = logging.getLogger(__name__)
-
-
-def _same_reading(raw: str, shown: str) -> bool:
-    """Duas grafias da mesma leitura? Ignora '+', virgula de milhar e caixa."""
-    strip = lambda s: re.sub(r"[^a-z0-9.%]", "", s.lower())  # noqa: E731
-    return strip(raw) == strip(shown)
 
 
 class EventKind(Enum):
@@ -465,12 +458,11 @@ class EnchantEngine:
                 self.profiler.record("  ! repescagem de OCR", res.backend_ms)
             parsed = parse_affix(res.text, self.catalog)
             options.append(parsed)
-            # Mostra o texto cru so' quando ele diverge de verdade da
-            # interpretacao. Comparar as strings direto enchia o log de ruido,
-            # porque a exibicao acrescenta "+" e tira a virgula de milhar.
+            # O texto cru vai no evento (`raw`), e a duvida na CHAVE da
+            # mensagem. Antes isto montava dois sufixos de texto — "[ocr: ...]"
+            # e "(duvidoso)" — para uma linha de log que deixou de existir
+            # quando o painel passou a guardar eventos em vez de frases.
             shown = parsed.describe()
-            extra = "" if _same_reading(res.text, shown) else f"   [ocr: {res.text!r}]"
-            flag = "" if parsed.confident else "  (duvidoso)"
             self._emit(
                 EventKind.READ,
                 "eng.option" if parsed.confident else "eng.option_doubt",
@@ -691,12 +683,8 @@ class EnchantEngine:
                         held = self._read_current(frame, prof, locked=True)
                         rule = self.ruleset.first_match(held) if held else None
                         if rule is not None:
-                            from .i18n import t
-
                             self._emit(EventKind.SUCCESS, "eng.already_ok",
                                        affix=held.describe(), rule=rule.describe())
-                            reason = t("eng.already_ok", affix=held.describe(),
-                                       rule=rule.describe())
                             return Outcome(
                                 True, "eng.already_ok",
                                 {"affix": held.describe(), "rule": rule.describe()},

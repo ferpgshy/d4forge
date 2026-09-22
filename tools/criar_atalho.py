@@ -10,7 +10,6 @@ você gerar o executável.
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -36,21 +35,27 @@ def alvo() -> tuple[str, str, str]:
 def main() -> int:
     destino_exe, args, workdir = alvo()
     icone = ROOT / "d4forge" / "resources" / f"{NOME}.ico"
-    desktop = Path.home() / "Desktop"
-    if not desktop.is_dir():
-        desktop = Path.home() / "Área de Trabalho"
-    atalho = desktop / f"{NOME}.lnk"
 
+    # Quem diz onde fica a Área de Trabalho é o WINDOWS, não o palpite de
+    # `~/Desktop`. Com o OneDrive ligado ela é REDIRECIONADA para
+    # `~/OneDrive/Área de Trabalho`, e o nome ainda muda com o idioma do
+    # sistema. Chutar os dois nomes mais prováveis falhava justamente na
+    # máquina mais comum — a com OneDrive — e o erro que saía era um
+    # DirectoryNotFoundException do PowerShell, que não diz nada disso.
+    #
     # O .lnk é um formato COM; o caminho sem dependências extras é o WScript.
     ps = f'''
+$desktop = [Environment]::GetFolderPath("Desktop")
+$atalho = Join-Path $desktop "{NOME}.lnk"
 $s = New-Object -ComObject WScript.Shell
-$l = $s.CreateShortcut("{atalho}")
+$l = $s.CreateShortcut($atalho)
 $l.TargetPath = "{destino_exe}"
 $l.Arguments = '{args}'
 $l.WorkingDirectory = "{workdir}"
 $l.IconLocation = "{icone}"
 $l.Description = "d4forge - assistente de encantamento para Diablo IV"
 $l.Save()
+Write-Output $atalho
 '''
     resultado = subprocess.run(
         ["powershell", "-NoProfile", "-Command", ps],
@@ -60,7 +65,7 @@ $l.Save()
         print(resultado.stderr)
         raise SystemExit("não consegui criar o atalho")
 
-    print(f"atalho criado: {atalho}")
+    print(f"atalho criado: {resultado.stdout.strip()}")
     print(f"  aponta para: {destino_exe}")
     return 0
 

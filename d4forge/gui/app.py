@@ -8,14 +8,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QPoint, QStringListModel, QTimer
-from PySide6.QtGui import QFont, QIcon, QValidator
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QValidator
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QCompleter,
     QDoubleSpinBox,
-    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -46,15 +45,38 @@ from ..profiling import Profiler
 from ..rules import Comparison, RuleSet, TargetRule
 from ..vision.ocr import OcrEngine
 from . import style
-from .frameless import FramelessMixin, TitleBarArea
+from .frameless import (
+    FramelessMixin,
+    TitleBarArea,
+    encaixar_na_tela,
+    geometria_salva,
+    restaurar_geometria,
+)
 from .mw_tab import MasterworkTab
 from .progress import ProgressPanel
+from .responsive import (
+    LinhaAdaptavel,
+    faixa_central,
+    pagina_rolavel,
+    trocar_conteudo,
+)
 from .temper_tab import TemperTab
 from .worker import EngineWorker, TemperWorker, WarmupWorker
 
 VK_F9 = 0x78
 VK_F10 = 0x79
 VK_F11 = 0x7A
+
+# Glifos dos botoes de janela, os MESMOS que o Windows usa nos dele (Segoe
+# Fluent Icons no 11, Segoe MDL2 Assets no 10). O "-", "[]" e "X" datilografados
+# que estavam aqui tinham cada um a sua altura e o seu peso: de longe a barra
+# parecia torta, e era.
+GLIFOS_JANELA = {
+    "btnMin": ("", "–"),
+    "btnMax": ("", "□"),
+    "btnClose": ("", "✕"),
+}
+GLIFO_RESTAURAR = ("", "❐")
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +184,11 @@ class ValueSpinBox(QDoubleSpinBox):
 
 
 class MainWindow(FramelessMixin, QMainWindow):
+    # A linha que o Windows 11 desenha em volta da janela. Sem dizer a cor ela
+    # vem no cinza do sistema, e um retangulo cinza em volta de uma janela
+    # inteira em dourado e preto e' a primeira coisa que o olho acha errada.
+    cor_da_borda = QColor(style.DOURADO_FRACO)
+
     def __init__(self, app_state: AppState) -> None:
         super().__init__()
         self.app = app_state
@@ -178,12 +205,12 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._catalog_carregado = False
 
         self.setWindowTitle(t("app.window"))
-        self.resize(1040, 840)
-        # Sem setMinimumSize fixo: um mínimo MENOR do que o layout precisa não
-        # impede o encolhimento, ele só deixa os widgets se sobreporem — era o
-        # que fazia os detalhes técnicos invadirem a tabela. O mínimo que o Qt
-        # calcula do próprio layout é o único que sempre confere.
-        self.setMinimumWidth(880)
+        # 880 de largura mínima era o preço de um layout que não encolhia: um
+        # mínimo MENOR do que o layout precisa não impede o encolhimento, só
+        # deixa os widgets se sobreporem. Agora cada aba mora numa área de
+        # rolagem (ver `responsive.pagina_rolavel`) — o que não cabe rola, nada
+        # se sobrepõe, e a janela aceita ser tão pequena quanto se queira.
+        self.setMinimumSize(520, 420)
         self.setup_frameless()
 
         icone = Path(config.RESOURCE_DIR) / "d4forge" / "resources" / "d4forge.ico"
@@ -204,11 +231,23 @@ class MainWindow(FramelessMixin, QMainWindow):
         corpo_layout.setContentsMargins(18, 12, 18, 16)
 
         self.tabs = QTabWidget()
+        # documentMode tira a moldura que o Qt desenha em volta do conteúdo:
+        # a folha de estilo já dá a separação, e a moldura virava um risco
+        # solto quando a aba passou a rolar.
+        self.tabs.setDocumentMode(True)
         # Uma aba por fluxo — Enchant e Tempering —, cada uma com o alvo, os
         # limites e o progresso dela. O Catálogo é dos dois, então fica fora.
-        self.tabs.addTab(self._build_panel(), t("tab.enchant"))
-        self.tabs.addTab(self._build_temper(), t("tab.temper"))
-        self.tabs.addTab(self._build_mw(), t("tab.mw"))
+        #
+        # As três primeiras rolam: são pilhas altas de cartões, e sem rolagem a
+        # janela não podia ser menor do que a mais alta delas. O Catálogo não —
+        # ele é uma tabela que já rola por dentro, e duas barras de rolagem
+        # encaixadas é pior do que o problema que resolveriam.
+        self._area_enchant = pagina_rolavel(self._build_panel())
+        self._area_temper = pagina_rolavel(self._build_temper())
+        self._area_mw = pagina_rolavel(self._build_mw())
+        self.tabs.addTab(self._area_enchant, t("tab.enchant"))
+        self.tabs.addTab(self._area_temper, t("tab.temper"))
+        self.tabs.addTab(self._area_mw, t("tab.mw"))
         self.tabs.addTab(self._build_catalog(), t("tab.catalog"))
         # A tabela do catálogo tem ~880 linhas: montá-la só quando alguém abre a
         # aba tira quase um segundo da abertura e da troca de idioma.
@@ -238,13 +277,26 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._warmup.ready.connect(lambda ms: self._note("msg.ocr_ready", ms=ms))
         self._warmup.start()
 
+        # Por último, com o layout já montado: antes disto o Qt ainda não sabe
+        # o mínimo da janela e `encaixar_na_tela` teria de adivinhá-lo.
+        #
+        # A janela abre onde foi fechada. Não havendo onde (primeira vez, ou
+        # monitor que sumiu), o tamanho pedido é cortado pela tela e o resto é
+        # centralizado — 1040x840 passava da altura útil de um 1080p, e a
+        # janela nascia com a barra de título acima do alcance do mouse.
+        if not restaurar_geometria(self, self.app.settings.window_geometry):
+            encaixar_na_tela(self, 1040, 840)
+        # Estado inicial anunciado À MÃO: `changeEvent` só avisa sobre
+        # MUDANÇAS, e uma propriedade que nunca foi escrita não casa com regra
+        # de folha de estilo alguma, nem com a negação dela.
+        self.sincronizar_maximizada()
+
     # ---------------------------------------------------------- cabeçalho
     def _build_header(self) -> QWidget:
         """Cabeçalho e barra de título ao mesmo tempo: a janela não tem moldura
         do Windows, então arrastar, maximizar e fechar moram aqui."""
         header = TitleBarArea(self)
         header.setObjectName("header")
-        header.setFixedHeight(82)
         fora = QVBoxLayout(header)
         fora.setContentsMargins(0, 0, 0, 0)
         fora.setSpacing(0)
@@ -267,17 +319,24 @@ class MainWindow(FramelessMixin, QMainWindow):
         topo.addWidget(self.btn_lang)
         topo.addSpacing(10)
 
-        for nome, simbolo, slot in (
-            ("btnMin", "–", self.showMinimized),
-            ("btnMax", "□", self.toggle_maximize),
-            ("btnClose", "✕", self.close),
+        self._botoes_janela: dict[str, QPushButton] = {}
+        for nome, dica, slot in (
+            ("btnMin", "window.minimize", self.showMinimized),
+            ("btnMax", "window.maximize", self.toggle_maximize),
+            ("btnClose", "window.close", self.close),
         ):
-            botao = QPushButton(simbolo)
+            botao = QPushButton(_glifo(nome))
             botao.setObjectName(nome)
             botao.setProperty("titlebar", True)
             botao.setCursor(Qt.CursorShape.ArrowCursor)
+            # Tab não deve parar nos botões de janela: eles não fazem parte do
+            # preenchimento, e o foco pousando neles desenhava um retângulo no
+            # canto ao abrir o app.
+            botao.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            botao.setToolTip(t(dica))
             botao.clicked.connect(slot)
             topo.addWidget(botao)
+            self._botoes_janela[nome] = botao
         fora.addLayout(topo)
 
         # Faixa de baixo: a marca.
@@ -294,7 +353,65 @@ class MainWindow(FramelessMixin, QMainWindow):
         marca_linha.addLayout(marca)
         marca_linha.addStretch()
         fora.addLayout(marca_linha)
+
+        # Altura travada no que o conteúdo PEDE, em vez dos 82 chutados de
+        # antes: naqueles 82 não cabiam a fila de botões e as duas linhas da
+        # marca, e a descida do "g" de "d4forge" saía cortada pela borda
+        # dourada. Travada, e não livre, para o cabeçalho não encolher junto
+        # quando o subtítulo se esconde numa janela estreita.
+        for w in (header, titulo, self.lbl_subtitle):
+            w.ensurePolished()
+        header.setFixedHeight(max(82, header.sizeHint().height()))
+
+        # A partir daqui o Windows sabe que esta faixa é a barra de título, e
+        # devolve de graça o que a versão anterior não tinha: arrastar com
+        # encaixe nas bordas, Win+Seta, duplo clique para maximizar, sacudir,
+        # Alt+Espaço e o menu do botão direito. O botão de maximizar entra
+        # junto porque é dele que sai o Snap Layouts do Windows 11.
+        self.register_title_bar(header, self._botoes_janela["btnMax"])
         return header
+
+    def on_maximize_changed(self, maximizada: bool) -> None:
+        """Ajusta o que só faz sentido num dos dois estados."""
+        # Encostada nas bordas da tela, a linha da moldura vira um risco no
+        # meio do nada: nenhuma janela do Windows desenha isso maximizada.
+        #
+        # "maximizada" e nao "maximized": o QWidget JA' tem uma propriedade
+        # `maximized`, so' de leitura, e `setProperty` sobre ela nao cria
+        # propriedade dinamica nenhuma - falha calada, e a folha de estilo
+        # nunca casava. Vale para `minimized` e `fullScreen` tambem.
+        shell = self.centralWidget()
+        if shell is None:  # estado trocado antes de a janela estar montada
+            return
+        shell.setProperty("maximizada", maximizada)
+        shell.style().unpolish(shell)
+        shell.style().polish(shell)
+
+        botao = getattr(self, "_botoes_janela", {}).get("btnMax")
+        if botao is not None:
+            botao.setText(
+                _glifo("btnRestore") if maximizada else _glifo("btnMax")
+            )
+            botao.setToolTip(
+                t("window.restore" if maximizada else "window.maximize")
+            )
+
+    # Abaixo disto o subtítulo do cabeçalho não cabe sem espremer os botões de
+    # janela contra a marca.
+    LARGURA_COM_SUBTITULO = 620
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - assinatura do Qt
+        super().resizeEvent(event)
+        # getattr: `setup_frameless` cria a janela nativa, e isso já rende um
+        # evento de tamanho — antes de o cabeçalho existir.
+        subtitulo = getattr(self, "lbl_subtitle", None)
+        if subtitulo is None:
+            return
+        # O subtítulo é explicação, não identidade: sacrificá-lo primeiro
+        # preserva a marca e os botões, que é o que precisa continuar legível.
+        cabe = event.size().width() >= self.LARGURA_COM_SUBTITULO
+        if subtitulo.isVisible() != cabe:
+            subtitulo.setVisible(cabe)
 
     def _refresh_lang_button(self) -> None:
         atual = self.app.settings.language
@@ -335,15 +452,17 @@ class MainWindow(FramelessMixin, QMainWindow):
 
         self.setUpdatesEnabled(False)
         try:
-            while self.tabs.count():
-                self.tabs.removeTab(0)
-            self.tabs.addTab(self._build_panel(), t("tab.enchant"))
-            self.tabs.addTab(self._build_temper(), t("tab.temper"))
-            self.tabs.addTab(self._build_mw(), t("tab.mw"))
-            # A aba do catálogo é a MESMA de antes, só com os rótulos trocados:
-            # o conteúdo dela não depende de idioma.
+            # As abas não são mais removidas e recriadas, só renomeadas: tirar
+            # e repor quatro páginas deixava as antigas penduradas no
+            # QTabWidget a cada troca de idioma, e devolvia o foco e a posição
+            # de rolagem ao início. Só o conteúdo do Enchant é refeito — ele é
+            # o único montado a partir dos textos.
+            trocar_conteudo(self._area_enchant, self._build_panel())
             self._retranslate_catalog()
-            self.tabs.addTab(self._catalog_page, t("tab.catalog"))
+            for i, chave in enumerate(
+                ("tab.enchant", "tab.temper", "tab.mw", "tab.catalog")
+            ):
+                self.tabs.setTabText(i, t(chave))
             self.tabs.setCurrentIndex(indice)
 
             self._reload_target()
@@ -361,6 +480,13 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.btn_mw_stop.setText(f"{t('panel.stop')}   ·   F12")
             self.lbl_subtitle.setText(t("app.subtitle"))
             self._refresh_lang_button()
+            for nome, chave in (
+                ("btnMin", "window.minimize"), ("btnClose", "window.close"),
+            ):
+                self._botoes_janela[nome].setToolTip(t(chave))
+            self._botoes_janela["btnMax"].setToolTip(
+                t("window.restore" if self.isMaximized() else "window.maximize")
+            )
         finally:
             self.setUpdatesEnabled(True)
 
@@ -391,12 +517,17 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.status = QLabel(t("panel.idle"))
         self.status.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status.setWordWrap(True)
         self.status.setStyleSheet(f"color: {style.COR_ESTADO['idle']};")
         layout.addWidget(self.status)
 
         self.substatus = QLabel(t("panel.hint"))
         self.substatus.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.substatus.setProperty("role", "hint")
+        # Quebra em vez de fixar a largura da aba: esta linha troca de texto a
+        # cada evento do ciclo, e o evento mais comprido definia sozinho o
+        # quanto a janela podia encolher.
+        self.substatus.setWordWrap(True)
         layout.addWidget(self.substatus)
 
         botoes = QHBoxLayout()
@@ -411,17 +542,20 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.btn_stop.clicked.connect(self._stop)
         botoes.addWidget(self.btn_start, 2)
         botoes.addWidget(self.btn_stop, 1)
-        layout.addLayout(botoes)
+        layout.addWidget(faixa_central(botoes, self.LARGURA_ACAO))
 
         dica = QLabel(t("panel.hotkey_hint"))
         dica.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dica.setProperty("role", "accent")
+        dica.setWordWrap(True)
         layout.addWidget(dica)
 
         layout.addWidget(self._build_target())
 
-        cartoes = QHBoxLayout()
-        cartoes.setSpacing(12)
+        # Lado a lado enquanto couberem os dois; empilhados quando não (ver
+        # `LinhaAdaptavel`). Espremidos a meia largura, "Tentativas" e o campo
+        # ao lado brigavam pelo mesmo pixel e o número ficava ilegível.
+        cartoes = LinhaAdaptavel(espaco=12)
 
         limites = QGroupBox(t("panel.limits"))
         col = QVBoxLayout(limites)
@@ -445,7 +579,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.spin_delay.setToolTip(t("panel.start_delay_tip"))
         col.addLayout(_campo(t("panel.start_delay"), self.spin_delay))
         col.addStretch()
-        cartoes.addWidget(limites, 1)
+        cartoes.add(limites, 1)
 
         seguranca = QGroupBox(t("panel.safety"))
         col2 = QVBoxLayout(seguranca)
@@ -470,8 +604,8 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.cmb_speed.setToolTip(t("panel.mouse_speed_tip"))
         col2.addLayout(_campo(t("panel.mouse_speed"), self.cmb_speed))
         col2.addStretch()
-        cartoes.addWidget(seguranca, 1)
-        layout.addLayout(cartoes)
+        cartoes.add(seguranca, 1)
+        layout.addWidget(cartoes)
 
         # Um só painel para a vida toda da janela: trocar de idioma recria as
         # abas, e um painel novo perderia as tentativas da sessão em curso.
@@ -491,6 +625,10 @@ class MainWindow(FramelessMixin, QMainWindow):
         layout.addWidget(self.box_unknown)
         return page
 
+    # Teto da dupla Iniciar/Parar. Solta, ela acompanhava a janela inteira:
+    # maximizada, "Iniciar" virava uma faixa vermelha de 1230 pixels.
+    LARGURA_ACAO = 780
+
     # --------------------------------------------------------------- alvo
     def _build_target(self) -> QWidget:
         """O alvo como CARTAO dentro do Enchant, e nao como aba separada.
@@ -503,21 +641,33 @@ class MainWindow(FramelessMixin, QMainWindow):
         form = QVBoxLayout(box)
         form.setSpacing(10)
 
-        linha1 = QHBoxLayout()
-        linha1.addWidget(QLabel(t("target.slot") + ":"))
+        # Peça e Afixo lado a lado enquanto couberem; empilhados quando não.
+        # Juntas as duas pediam uns 500 pixels e eram elas que traziam a barra
+        # de rolagem horizontal antes de qualquer outra coisa apertar.
+        linha1 = LinhaAdaptavel(espaco=14)
+        caixa_slot = QWidget()
+        col_slot = QHBoxLayout(caixa_slot)
+        col_slot.setContentsMargins(0, 0, 0, 0)
+        col_slot.addWidget(QLabel(t("target.slot") + ":"))
         self.cmb_slot = QComboBox()
         self.cmb_slot.addItem(t("target.slot_all"), None)
         for slot in Slot:
             self.cmb_slot.addItem(slot.label, slot)
         self.cmb_slot.setToolTip(t("target.slot_tip"))
         self.cmb_slot.currentIndexChanged.connect(self._refresh_affix_choices)
-        linha1.addWidget(self.cmb_slot)
+        col_slot.addWidget(self.cmb_slot, 1)
+        linha1.add(caixa_slot, 0)
 
-        linha1.addSpacing(14)
-        linha1.addWidget(QLabel(t("target.affix") + ":"))
+        caixa_afixo = QWidget()
+        col_afixo = QHBoxLayout(caixa_afixo)
+        col_afixo.setContentsMargins(0, 0, 0, 0)
+        col_afixo.addWidget(QLabel(t("target.affix") + ":"))
         self.cmb_affix = QComboBox()
         self.cmb_affix.setEditable(True)
-        self.cmb_affix.setMinimumWidth(320)
+        # 320 fixos obrigavam a linha inteira a ter 320 + rótulos + o seletor
+        # de slot, e era daí que vinha metade da largura mínima da janela. O
+        # peso 1 no layout já lhe dá todo o espaço que sobrar.
+        self.cmb_affix.setMinimumWidth(180)
         self.cmb_affix.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
 
         # Busca por trecho, não por começo: são ~880 afixos e o nome quase nunca
@@ -532,8 +682,9 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.cmb_affix.setCompleter(completer)
         self.cmb_affix.lineEdit().setPlaceholderText(t("target.search_placeholder"))
         self.cmb_affix.currentTextChanged.connect(self._update_unit_hint)
-        linha1.addWidget(self.cmb_affix, 1)
-        form.addLayout(linha1)
+        col_afixo.addWidget(self.cmb_affix, 1)
+        linha1.add(caixa_afixo, 1)
+        form.addWidget(linha1)
 
         linha2 = QHBoxLayout()
         linha2.addWidget(QLabel(t("target.condition") + ":"))
@@ -546,6 +697,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         linha2.addWidget(self.spin_value)
         self.lbl_unit = QLabel("")
         self.lbl_unit.setProperty("role", "accent")
+        self.lbl_unit.setWordWrap(True)
         linha2.addWidget(self.lbl_unit)
         linha2.addStretch()
         form.addLayout(linha2)
@@ -566,6 +718,13 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.chk_climb.setChecked(True)
         self.chk_climb.setToolTip(t("target.climb_tip"))
         form.addWidget(self.chk_climb)
+        # A explicação sai de dentro da caixa de marcar: ali ela não quebrava
+        # linha e fixava a largura mínima da aba inteira. Aqui quebra.
+        climb_hint = QLabel(t("target.climb_hint"))
+        climb_hint.setProperty("role", "hint")
+        climb_hint.setWordWrap(True)
+        climb_hint.setIndent(23)
+        form.addWidget(climb_hint)
 
         self.lbl_target_summary = QLabel("")
         self.lbl_target_summary.setProperty("role", "hint")
@@ -731,7 +890,6 @@ class MainWindow(FramelessMixin, QMainWindow):
         linha.addWidget(self.btn_catalog_remove)
         linha.addWidget(self.btn_catalog_save)
         layout.addLayout(linha)
-        self._catalog_page = page
         return page
 
     def _remove_catalog_row(self) -> None:
@@ -947,7 +1105,9 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.btn_temper_stop.clicked.connect(self._stop_temper)
             botoes.addWidget(self.btn_temper, 2)
             botoes.addWidget(self.btn_temper_stop, 1)
-            self.temper_tab.layout().insertLayout(1, botoes)
+            self.temper_tab.layout().insertWidget(
+                1, faixa_central(botoes, self.LARGURA_ACAO)
+            )
         return self.temper_tab
 
     def _start_temper(self) -> None:
@@ -1026,7 +1186,9 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.btn_mw_stop.clicked.connect(self._stop_mw)
             botoes.addWidget(self.btn_mw, 2)
             botoes.addWidget(self.btn_mw_stop, 1)
-            self.mw_tab.layout().insertLayout(1, botoes)
+            self.mw_tab.layout().insertWidget(
+                1, faixa_central(botoes, self.LARGURA_ACAO)
+            )
         return self.mw_tab
 
     def _start_mw(self) -> None:
@@ -1115,6 +1277,9 @@ class MainWindow(FramelessMixin, QMainWindow):
         if self._warmup.isRunning():
             self._warmup.wait(3000)
         self._collect_settings()
+        # Onde e de que tamanho a janela estava, para reabrir assim. Gravado
+        # antes de `save`, que é quem escreve o settings.json.
+        self.app.settings.window_geometry = geometria_salva(self)
         self.app.save()
 
         # Fechamento normal leva o material de depuração junto. Num crash este
@@ -1131,9 +1296,48 @@ def _campo(rotulo: str, widget: QWidget) -> QHBoxLayout:
     texto = QLabel(rotulo)
     texto.setProperty("role", "hint")
     texto.setMinimumWidth(120)
+    # Teto no campo: sem ele, rótulo e valor acabam em pontas opostas da tela
+    # numa janela maximizada, e a dupla deixa de ser lida como uma dupla.
+    widget.setMaximumWidth(300)
     linha.addWidget(texto)
-    linha.addWidget(widget, 1)
+    # Peso alto no campo e uma sobra de peso 1 no fim: o campo fica com tudo o
+    # que puder até o teto, e o que passar disso vira espaço vazio À DIREITA —
+    # sem a sobra, o teto empurrava o campo para a borda do cartão e abria um
+    # vão entre ele e o rótulo.
+    linha.addWidget(widget, 1000)
+    linha.addStretch(1)
     return linha
+
+
+def _glifo(nome: str) -> str:
+    """O glifo do botão de janela, ou o símbolo de texto se a fonte faltar.
+
+    As fontes de ícone vêm com o Windows 10 1809 e com o 11. Numa máquina sem
+    elas, o glifo apareceria como um retângulo vazio — e um retângulo vazio no
+    lugar do botão de fechar é pior do que um "X" datilografado.
+    """
+    icone, reserva = (
+        GLIFO_RESTAURAR if nome == "btnRestore" else GLIFOS_JANELA[nome]
+    )
+    return icone if _tem_fonte_de_icones() else reserva
+
+
+def _tem_fonte_de_icones() -> bool:
+    global _FONTE_DE_ICONES
+    if _FONTE_DE_ICONES is None:
+        try:
+            familias = set(QFontDatabase.families())
+        except (AttributeError, TypeError):  # pragma: no cover - PySide antigo
+            familias = set()
+        _FONTE_DE_ICONES = bool(
+            familias & {"Segoe Fluent Icons", "Segoe MDL2 Assets"}
+        )
+    return _FONTE_DE_ICONES
+
+
+# Resolvido uma vez: `families()` varre as fontes instaladas e custa dezenas de
+# milissegundos, e isto é consultado uma vez por botão e a cada maximizar.
+_FONTE_DE_ICONES: bool | None = None
 
 
 def _guess_unit(name: str) -> Unit:
@@ -1160,6 +1364,10 @@ def _as_float(item, default):
 
 def main() -> int:
     app = QApplication(sys.argv)
+    # Nome e organização entram no que o Windows mostra na barra de tarefas e
+    # nas caixas de diálogo do sistema; sem eles aparecia "python".
+    app.setApplicationName("d4forge")
+    app.setApplicationDisplayName("d4forge")
     app.setStyleSheet(style.QSS)
     janela = MainWindow(AppState.load())
     janela.show()

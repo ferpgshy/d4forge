@@ -230,6 +230,59 @@ acendendo.
 - **Ordenar as caixas do detector é obrigatório** — ele devolve em ordem
   arbitrária, e juntar na ordem de chegada fazia `+4 Energy` virar `Energy +4`.
 
+### Tirar a barra de título custa mais do que parece
+
+A janela não tem a moldura do Windows, para não destoar do jogo ao lado. A
+primeira versão devolvia à mão o que a moldura dava: arrastar e redimensionar,
+respondendo a `mouseMoveEvent`. O resultado era uma janela que **movia**, e nada
+mais — não encaixava ao chegar na borda, não obedecia Win+Seta, não mostrava o
+cursor de redimensionar, não abria o Snap Layouts, não tinha sombra.
+
+O jeito certo é o contrário do que parece: em vez de tirar a moldura, **mantê-la
+e apagar só o desenho dela**. A janela conserva `WS_THICKFRAME | WS_CAPTION` — é
+deles que vêm todos os gestos — e devolve zero em `WM_NCCALCSIZE`, que manda a
+área do cliente ocupar a janela inteira. Daí em diante basta responder
+`WM_NCHITTEST`: `HTCAPTION` na faixa do cabeçalho, `HT*` nas bordas,
+`HTMAXBUTTON` sobre o botão de maximizar (é dele que sai o Snap Layouts).
+Chrome, VS Code e o Terminal do Windows fazem assim. Fica em `gui/win32frame.py`.
+
+Duas armadilhas no caminho:
+
+- **Maximizada, o Windows estica a janela para fora da tela** pela espessura da
+  moldura — que seria invisível, se houvesse moldura. Sem descontar isso no
+  `WM_NCCALCSIZE`, a interface vaza pelas quatro bordas do monitor e ainda invade
+  o vizinho. E se a barra de tarefas se esconde sozinha, é preciso deixar um
+  pixel livre do lado dela, ou ela não reaparece.
+- **`maximized` já é uma propriedade do QWidget, e só de leitura.**
+  `setProperty("maximized", True)` não cria propriedade dinâmica nenhuma: falha
+  calada, e a regra `[maximized="true"]` da folha de estilo nunca casa. Vale
+  para `minimized` e `fullScreen` também.
+
+### Um layout que não encolhe não é responsivo, é rígido
+
+A janela exigia 880 px de largura e abria com 840 de altura — mais que a área
+útil de um monitor 1080p, então ela nascia com parte de si fora do alcance. Um
+mínimo menor do que o layout precisa não faz o layout encolher; só deixa os
+widgets se sobreporem.
+
+Foram três remédios, em `gui/responsive.py`:
+
+- **Cada aba rola.** O mínimo de uma área de rolagem é o dela mesma, não o da
+  página lá dentro — é isto que baixou o mínimo da janela de 880 para 520.
+- **Cartões lado a lado viram coluna** abaixo da largura em que os dois cabem
+  inteiros, com histerese para o layout não piscar durante o arrasto. A sutileza
+  é a linha anunciar como mínimo a largura da COLUNA mesmo estando em linha:
+  anunciando a da linha, ela reservava essa largura para sempre e a virada que
+  existe para evitar a barra horizontal nunca acontecia.
+- **Esticar sem limite é tão ruim quanto não esticar.** Maximizada num monitor
+  de 1920, a janela dava 1230 px ao botão "Iniciar" e 750 a uma caixa de três
+  dígitos.
+
+E o que mais fixa largura mínima é **texto que não quebra linha**: um `QCheckBox`
+nunca quebra, por mais que se peça. A explicação de "Subir aos poucos" saiu de
+dentro da caixa de marcar e virou uma linha à parte por causa disso. Há um teste
+que varre as abas atrás de rótulos longos sem quebra.
+
 ---
 
 ## Catálogo de afixos

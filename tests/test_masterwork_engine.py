@@ -72,7 +72,14 @@ class JanelaFalsa(GameWindow):
 
     def __init__(self, client: Rect, foreground: bool = True) -> None:
         super().__init__(hwnd=1, title="Diablo IV", client=client, window=client)
-        self._foreground = foreground
+        # `object.__setattr__` e nao atribuicao simples: a GameWindow e' um
+        # dataclass FROZEN, e atribuir num frozen so' se faz assim. A
+        # atribuicao direta ainda passa pelo `__setattr__` que o dataclass
+        # gera - e esse, quando a classe tambem e' `slots=True`, tem um
+        # `super()` de zero argumentos que quebra numa SUBCLASSE
+        # (CPython gh-90562, corrigido no 3.13). Aqui o caminho e' o mesmo
+        # nas duas versoes.
+        object.__setattr__(self, "_foreground", foreground)
 
     @property
     def is_foreground(self) -> bool:
@@ -244,8 +251,6 @@ def test_o_teto_de_esc_nao_da_para_desligar(roteiro):
 def test_para_quando_nao_consegue_ler_o_afixo(roteiro, mw_shots):
     """Sem saber qual afixo está no item, rerrolar pode passar por cima do
     certo — e são 10.000.000 para descobrir que era ele."""
-    import numpy as np
-
     from d4forge.masterwork.profile import DEFAULT_MW_PROFILE
 
     img = mw_shots["mw_affix"].copy()

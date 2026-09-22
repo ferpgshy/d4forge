@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from .affixes import ParsedAffix, Unit
+from .affixes import ParsedAffix
 
 
 class Comparison(Enum):

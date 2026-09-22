@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ..i18n import t
 from ..masterwork.rules import MasterworkGoal, MasterworkLimits
 from .mw_panel import MasterworkProgressPanel
+from .responsive import LinhaAdaptavel
 
 
 class MasterworkTab(QWidget):
@@ -47,11 +48,12 @@ class MasterworkTab(QWidget):
         self.lbl_hint.setProperty("role", "hint")
         raiz.addWidget(self.lbl_hint)
 
-        cartoes = QHBoxLayout()
-        cartoes.setSpacing(12)
-        cartoes.addWidget(self._build_goal(), 1)
-        cartoes.addWidget(self._build_limits(), 1)
-        raiz.addLayout(cartoes)
+        # Lado a lado enquanto couberem os dois, empilhados quando nao - ver
+        # `LinhaAdaptavel`.
+        cartoes = LinhaAdaptavel(espaco=12)
+        cartoes.add(self._build_goal(), 1)
+        cartoes.add(self._build_limits(), 1)
+        raiz.addWidget(cartoes)
 
         self.status = QLabel(t("mw.idle"))
         # Enquanto nada rodou, o texto do estado é a frase FIXA de repouso e
@@ -73,7 +75,9 @@ class MasterworkTab(QWidget):
 
         self.cmb_affix = QComboBox()
         self.cmb_affix.setEditable(True)
-        self.cmb_affix.setMinimumWidth(320)
+        # Minimo enxuto: o peso no layout ja' lhe da' o espaco que sobrar, e
+        # 320 fixos empurravam a largura minima da janela inteira.
+        self.cmb_affix.setMinimumWidth(180)
         self.cmb_affix.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
 
         # Busca por TRECHO, e nao pelo comeco: sao ~880 afixos e o nome quase

@@ -40,6 +40,9 @@ QWidget#shell {{
     background: {FUNDO};
     border: 1px solid {BORDA_CLARA};
 }}
+/* Maximizada a janela encosta nas bordas da tela, e a linha da moldura vira
+   um risco no meio do nada — nenhuma janela do Windows desenha isso. */
+QWidget#shell[maximizada="true"] {{ border: none; }}
 
 /* Cor chapada, e nao gradiente: entre #1f1a13 e #262019 ha' sete niveis de
    diferenca, e espalha-los por mil pixels rendia degraus visiveis - parecia um
@@ -69,16 +72,29 @@ QPushButton[titlebar="true"] {{
     border: none;
     border-radius: 0;
     color: {TEXTO_FRACO};
-    font-size: 15px;
-    font-family: "Segoe MDL2 Assets", "Segoe UI Symbol", sans-serif;
+    font-size: 10px;
+    font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", "Segoe UI Symbol";
     padding: 0;
-    min-width: 44px;
-    max-width: 44px;
+    min-width: 46px;
+    max-width: 46px;
     min-height: 34px;
     max-height: 34px;
 }}
 QPushButton[titlebar="true"]:hover {{ background: #33291f; color: {TEXTO}; }}
 QPushButton#btnClose:hover {{ background: {VERMELHO}; color: #ffffff; }}
+/* O botão de maximizar fica na área NÃO-CLIENTE para o Snap Layouts do
+   Windows 11 funcionar (ver win32frame), e ali o Qt nunca vê o cursor passar:
+   `:hover` não dispara sozinho. Estas duas regras são o mesmo destaque,
+   acionado pela propriedade que a moldura nativa liga e desliga. */
+QPushButton[titlebar="true"][hover="true"] {{ background: #33291f; color: {TEXTO}; }}
+QPushButton#btnClose[hover="true"] {{ background: {VERMELHO}; color: #ffffff; }}
+
+/* ------------------------------------------ páginas que rolam */
+/* A aba inteira vive dentro de uma area de rolagem (ver responsive.py). Sem
+   estas duas regras ela pintaria o proprio fundo por cima do da janela e o
+   conteudo ganharia uma moldura cinza em volta. */
+QScrollArea#pagina {{ border: none; background: transparent; }}
+QScrollArea#pagina > QWidget > QWidget {{ background: transparent; }}
 
 /* -------------------------------------------------- abas */
 QTabWidget::pane {{ border: none; background: {FUNDO}; }}
@@ -168,6 +184,10 @@ QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
 QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {{
     border-color: {DOURADO_FRACO};
 }}
+/* Teto para campos de numero. Sem ele, a janela maximizada num monitor largo
+   dava 750 pixels a uma caixa de tres digitos - o rotulo ficava numa ponta e o
+   valor na outra, e ler a dupla exigia atravessar a tela com os olhos. */
+QSpinBox, QDoubleSpinBox {{ max-width: 300px; }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox QAbstractItemView {{
     background: {FUNDO_CAMPO};

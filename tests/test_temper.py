@@ -20,6 +20,19 @@ from d4forge.temper import (
 from d4forge.temper.result import TemperResult, text_bands
 
 
+def _sem_espacos(texto: str) -> str:
+    """O mesmo texto sem espaço nenhum.
+
+    O intervalo entre colchetes sai `[4.0 - 8.0]` numa versão do RapidOCR e
+    `[4.0-8.0]` noutra, e a diferença é só onde o modelo decide que há um
+    espaço. Para o app isso não existe: `parse_temper_result` devolve o mesmo
+    valor e a mesma decisão de GA nas duas grafias (e na `[4.0 -8.0]`, que
+    também aparece). Comparar com os espaços dentro fazia o teste falhar por
+    causa do modelo, não por causa do código.
+    """
+    return "".join(texto.split())
+
+
 def _perfil(img):
     return DEFAULT_TEMPER_PROFILE.scaled(Rect(0, 0, img.shape[1], img.shape[0]))
 
@@ -198,16 +211,27 @@ def test_le_o_afixo_sorteado_nas_duas_linhas(temper_shots, ocr):
 
     assert "Lucky Hit" in texto
     assert "8.4%" in texto
-    assert "[5.0 - 10.0]" in texto
+    assert "[5.0-10.0]" in _sem_espacos(texto), texto
 
 
-def test_roi_unica_das_duas_linhas_nao_funciona(temper_shots, ocr):
-    """Fixa o motivo de `read_text_lines` existir. Se um dia o detector passar
-    a dar conta do bloco inteiro, este teste falha e o código pode simplificar."""
+def test_read_text_lines_le_o_bloco_de_duas_linhas(temper_shots, ocr):
+    """Fixa o motivo de `read_text_lines` existir — e o que ele garante.
+
+    A versão anterior deste teste afirmava o CONTRÁRIO: que uma ROI única
+    cobrindo as duas linhas voltava vazia do detector, e falhava de propósito
+    "se um dia o detector der conta do bloco inteiro". Esse dia chegou — do
+    RapidOCR 1.4 em diante a ROI única lê o intervalo. Mas isso é propriedade
+    da VERSÃO instalada, não do nosso código, e `requirements.txt` não prende
+    versão: numa máquina com a 1.3 a leitura direta volta a falhar.
+
+    Então o teste passou a cobrar o que é nosso e vale nas duas: por linha, o
+    bloco inteiro é lido. Se um dia o piso de versão subir para a 1.4, aí sim
+    `read_text_lines` pode ser reavaliado."""
     img = temper_shots["temper_result"]
-    direto = ocr.read(_perfil(img).result_text.crop(img)).text
+    texto = read_text_lines(img, _perfil(img).result_text, ocr)
 
-    assert "10.0" not in direto, f"agora funciona: {direto!r}"
+    assert "Lucky Hit" in texto
+    assert "[5.0-10.0]" in _sem_espacos(texto), texto
 
 
 def test_ga_e_roll_normal_do_mesmo_afixo(temper_shots, ocr):
@@ -227,7 +251,7 @@ def test_ga_e_roll_normal_do_mesmo_afixo(temper_shots, ocr):
         assert detect_temper_state(img, prof).state is TemperState.RESULT, tela
 
         texto = read_text_lines(img, prof.result_text, ocr)
-        assert texto == texto_esperado, tela
+        assert _sem_espacos(texto) == _sem_espacos(texto_esperado), (tela, texto)
 
         r = parse_temper_result(texto)
         assert r.readable, tela
@@ -257,8 +281,6 @@ def test_ga_curto_nao_e_confundido_com_animacao(temper_shots, largura):
     Aqui a linha real é recortada em larguras cada vez menores para provar que
     o comprimento do nome do afixo não decide mais nada.
     """
-    import numpy as np
-
     import numpy as np
 
     from d4forge.temper.result import has_text_lines
@@ -347,8 +369,6 @@ def test_le_quantos_rerolls_restam(temper_shots, ocr):
 
 
 def test_bandas_separam_as_linhas(temper_shots):
-    import numpy as np
-
     from d4forge.vision.preprocess import binarize, to_gray
 
     img = temper_shots["temper_result"]

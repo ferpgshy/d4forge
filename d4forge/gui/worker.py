@@ -10,7 +10,6 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, QThread, Signal
 
 from ..engine import EnchantEngine, EngineEvent, Outcome
-from ..profile import EnchantProfile
 from ..vision.states import StateReading
 
 

@@ -12,7 +12,6 @@ from d4forge.geometry import Point, Rect
 from d4forge.temper.engine import TemperEngine
 from d4forge.temper.result import TemperResult
 from d4forge.temper.rules import Recharge, TemperGoal, TemperLimits
-from d4forge.temper.states import TemperState
 from d4forge.vision.ocr import OcrEngine
 from d4forge.window import GameWindow
 
@@ -52,7 +51,14 @@ class JanelaFalsa(GameWindow):
 
     def __init__(self, client: Rect, foreground: bool = True) -> None:
         super().__init__(hwnd=1, title="Diablo IV", client=client, window=client)
-        self._foreground = foreground
+        # `object.__setattr__` e nao atribuicao simples: a GameWindow e' um
+        # dataclass FROZEN, e atribuir num frozen so' se faz assim. A
+        # atribuicao direta ainda passa pelo `__setattr__` que o dataclass
+        # gera - e esse, quando a classe tambem e' `slots=True`, tem um
+        # `super()` de zero argumentos que quebra numa SUBCLASSE
+        # (CPython gh-90562, corrigido no 3.13). Aqui o caminho e' o mesmo
+        # nas duas versoes.
+        object.__setattr__(self, "_foreground", foreground)
 
     @property
     def is_foreground(self) -> bool:

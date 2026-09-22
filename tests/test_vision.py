@@ -47,43 +47,45 @@ def test_no_change_vem_marcado_por_padrao(shots, profiles):
     assert idx == 2
 
 
-# "+25 Maximum Resource" sai como "+25 Maxirmlirn Resolirce" no RapidOCR 1.4.
-# Nao e' moldura nem ROI: o modelo de RECONHECIMENTO mudou entre versoes, e
-# `requirements.txt` nao prende nenhuma (`rapidocr-onnxruntime>=1.2`), entao a
-# mesma maquina le' diferente conforme o dia em que instalou. Medido: a 1.4.3 e
-# a 1.4.4 erram esta linha, a 1.4.0-1.4.2 erram esta e mais uma, a 1.3.25 erra
-# cinco.
+# O que o MOTOR decide, e nao a grafia crua que saiu do modelo.
 #
-# A correcao por catalogo tambem nao alcanca - a similaridade fica em 0,706,
-# abaixo do piso de `parse_affix`. Baixar esse piso para salvar um caso
-# arriscaria casar o afixo ERRADO entre os ~880 do catalogo, que e' exatamente
-# o defeito que o piso existe para impedir. Nao vale a troca.
+# Antes este teste chamava `ocr.read(roi)` sem `verify` e comparava strings. O
+# app nunca le' assim: ele passa `_verify_parse`, e e' esse juiz que faz a
+# leitura SUBIR a escada de renderizacoes ate' o catalogo reconhecer a linha
+# (ver RENDER_LADDER em vision/preprocess.py). Sem o juiz, a escada para no
+# primeiro degrau e o teste cobrava um caminho que nao existe em producao.
 #
-# Uma linha por caso, e nao a lista inteira num assert so': assim as outras
-# tres continuam cobradas de verdade em vez de sumirem junto com esta.
-MOTIVO_XFAIL = (
-    "RapidOCR >= 1.4 le '+25 Maximum Resource' como '+25 Maxirmlirn Resolirce'"
+# A diferenca nao e' academica. Nesta tela, com o RapidOCR 1.4, a terceira
+# linha sai "+25 Maxirmlirn Resolirce" no primeiro degrau - irreconhecivel. Com
+# o juiz, a escada sobe, a leitura vira "+25 Maximum Resolrce" e o catalogo a
+# casa com "Maximum Resource" a 0,933. O nome e o valor saem certos, que e' o
+# que decide aceitar ou rolar de novo.
+#
+# Uma linha por caso para que uma falha diga QUAL linha quebrou.
+EXPECTED_AFFIX = {
+    "enchant_select": [
+        ("Imbuement Skills", 2.0),
+        ("Dexterity", 151.0),
+        ("Maximum Resource", 25.0),
+        ("Shadow Resistance", 3000.0),
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    "linha, nome, valor",
+    [(i, n, v) for i, (n, v) in enumerate(EXPECTED_AFFIX["enchant_select"])],
 )
-LINHA_QUE_O_MODELO_NOVO_ERRA = 2
-
-
-def _linhas_do_enchant():
-    for i, esperado in enumerate(EXPECTED_TEXT["enchant_select"]):
-        marcas = (
-            # `strict=False`: numa maquina com RapidOCR antigo esta linha PASSA,
-            # e um xpass nao pode virar erro.
-            [pytest.mark.xfail(reason=MOTIVO_XFAIL, strict=False)]
-            if i == LINHA_QUE_O_MODELO_NOVO_ERRA
-            else []
-        )
-        yield pytest.param(i, esperado, marks=marcas)
-
-
-@pytest.mark.parametrize("linha, esperado", list(_linhas_do_enchant()))
-def test_le_o_afixo_da_tela_de_selecao(shots, profiles, ocr, catalog, linha, esperado):
+def test_le_o_afixo_da_tela_de_selecao(shots, profiles, ocr, catalog, linha, nome, valor):
     img, prof = shots["enchant_select"], profiles["enchant_select"]
-    got = ocr.read(prof.affix_rows[linha].crop(img)).text
-    assert got == esperado
+    verifica = lambda texto: parse_affix(texto, catalog).confident  # noqa: E731
+
+    lido = ocr.read(prof.affix_rows[linha].crop(img), verifica)
+    afixo = parse_affix(lido.text, catalog)
+
+    assert afixo.confident, f"leitura nao reconhecida: {lido.text!r}"
+    assert afixo.name == nome, lido.text
+    assert afixo.value == valor, lido.text
 
 
 def test_le_as_opcoes_da_tela_replace(shots, profiles, ocr, catalog):

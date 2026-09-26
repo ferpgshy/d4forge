@@ -400,3 +400,140 @@ def test_a_captura_so_nasce_quando_alguem_precisa_de_quadro(qt_app, config_isola
     finally:
         janela.close()
         janela.autoskill_worker.wait(3000)
+
+
+# ------------------------------------------------------- rodízio entre slots
+class _Espiao:
+    """Conta quem foi apertado, sem tocar no teclado de verdade."""
+
+    def __init__(self):
+        self.apertados = []
+
+    def __call__(self, bind, hold=None):
+        self.apertados.append(bind.rotulo)
+        return True
+
+
+def _motor_com_dois_slots(monkeypatch, espiao, prontos=(True, True)):
+    from d4forge.autoskill import engine as motor
+
+    cfg = AutoSkillConfig()
+    cfg.cast.slots[0] = SlotConfig(binds.tecla(0x31, "1"), ModoDoSlot.COOLDOWN, 1)
+    cfg.cast.slots[1] = SlotConfig(binds.tecla(0x32, "2"), ModoDoSlot.COOLDOWN, 2)
+    monkeypatch.setattr(motor.binds, "disparar", espiao)
+
+    engine = motor.AutoSkillEngine(cfg)
+
+    class LeitorFalso:
+        def ler(self, _quadro, rois):
+            from d4forge.autoskill.vision import EstadoDoSlot
+
+            return [
+                EstadoDoSlot(i, 200.0, 200.0, not (prontos[i] if i < len(prontos) else False))
+                for i in range(len(rois))
+            ]
+
+    engine._leitor = LeitorFalso()
+    return engine, cfg
+
+
+def test_dois_slots_prontos_se_revezam(monkeypatch, perfil):
+    """O bug que o usuário achou: com 1 e 2 em "manter em cooldown", só o 1
+    disparava. A varredura reiniciava sempre na maior prioridade e saía no
+    primeiro que disparasse, então o slot 2 nunca chegava a vez."""
+    import numpy as np
+
+    espiao = _Espiao()
+    engine, _cfg = _motor_com_dois_slots(monkeypatch, espiao)
+    quadro = np.zeros((10, 10, 3), dtype=np.uint8)
+    estado = type("E", (), {"slots_prontos": [], "ultima_acao": ""})()
+
+    # Seis tiques, com folga entre eles para a carência não mascarar o rodízio.
+    for tique in range(6):
+        engine._talvez_castar(quadro, perfil, estado, tique * 1.0)
+
+    assert espiao.apertados == ["1", "2", "1", "2", "1", "2"], espiao.apertados
+
+
+def test_a_prioridade_manda_em_quem_comeca(monkeypatch, perfil):
+    """Prioridade continua sendo ordem — o de menor número abre o rodízio."""
+    import numpy as np
+
+    espiao = _Espiao()
+    engine, cfg = _motor_com_dois_slots(monkeypatch, espiao)
+    cfg.cast.slots[0].prioridade = 5      # o slot 2 passa na frente
+    quadro = np.zeros((10, 10, 3), dtype=np.uint8)
+    estado = type("E", (), {"slots_prontos": [], "ultima_acao": ""})()
+
+    for tique in range(4):
+        engine._talvez_castar(quadro, perfil, estado, tique * 1.0)
+
+    assert espiao.apertados == ["2", "1", "2", "1"], espiao.apertados
+
+
+def test_carencia_impede_repetir_antes_de_o_jogo_mostrar_o_cooldown(
+    monkeypatch, perfil
+):
+    """O jogo leva um ou dois quadros para escurecer o ícone. Sem carência, o
+    tique seguinte lê "pronta" de novo e aperta a mesma tecla."""
+    import numpy as np
+
+    from d4forge.autoskill.engine import GRACA_APOS_DISPARO_S
+
+    espiao = _Espiao()
+    # So' o slot 1 configurado: sem rodizio para mascarar a carencia.
+    engine, cfg = _motor_com_dois_slots(monkeypatch, espiao)
+    cfg.cast.slots[1] = SlotConfig()
+    quadro = np.zeros((10, 10, 3), dtype=np.uint8)
+    estado = type("E", (), {"slots_prontos": [], "ultima_acao": ""})()
+
+    engine._talvez_castar(quadro, perfil, estado, 100.0)
+    assert espiao.apertados == ["1"]
+
+    # Dentro da carência: não repete.
+    engine._talvez_castar(quadro, perfil, estado, 100.0 + GRACA_APOS_DISPARO_S / 2)
+    assert espiao.apertados == ["1"], "apertou de novo cedo demais"
+
+    # Passada a carência, volta a valer.
+    engine._talvez_castar(quadro, perfil, estado, 100.0 + GRACA_APOS_DISPARO_S * 2)
+    assert espiao.apertados == ["1", "1"]
+
+
+def test_slot_em_cooldown_cede_a_vez_em_vez_de_travar_a_fila(monkeypatch, perfil):
+    """Se o de maior prioridade está em cooldown, o seguinte dispara — e o
+    rodízio não pode deixar o ciclo parado esperando por ele."""
+    import numpy as np
+
+    espiao = _Espiao()
+    engine, _cfg = _motor_com_dois_slots(monkeypatch, espiao, prontos=(False, True))
+    quadro = np.zeros((10, 10, 3), dtype=np.uint8)
+    estado = type("E", (), {"slots_prontos": [], "ultima_acao": ""})()
+
+    for tique in range(3):
+        engine._talvez_castar(quadro, perfil, estado, tique * 1.0)
+
+    assert espiao.apertados == ["2", "2", "2"], espiao.apertados
+
+
+def test_extras_entram_no_mesmo_rodizio(monkeypatch, perfil):
+    """Dois botões de mouse em spam também se revezam — antes só o primeiro
+    da lista era apertado, pelo mesmo motivo."""
+    from d4forge.autoskill import engine as motor
+
+    espiao = _Espiao()
+    cfg = AutoSkillConfig()
+    cfg.cast.extras = [
+        SlotConfig(binds.botao_mouse(binds.VK_XBUTTON1), ModoDoSlot.SPAM),
+        SlotConfig(binds.botao_mouse(binds.VK_XBUTTON2), ModoDoSlot.SPAM),
+    ]
+    monkeypatch.setattr(motor.binds, "disparar", espiao)
+    engine = motor.AutoSkillEngine(cfg)
+    estado = type("E", (), {"slots_prontos": [], "ultima_acao": ""})()
+
+    for tique in range(4):
+        engine._talvez_castar(None, None, estado, tique * 1.0)
+
+    assert espiao.apertados == [
+        "Mouse lateral 1", "Mouse lateral 2",
+        "Mouse lateral 1", "Mouse lateral 2",
+    ], espiao.apertados

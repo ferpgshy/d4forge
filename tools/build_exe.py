@@ -21,6 +21,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,6 +65,42 @@ def garantir_icone() -> Path:
         executar(str(PY), str(ROOT / "tools" / "make_icon.py"),
                  descricao="gerando ícone")
     return icone
+
+
+def guardar_dados(raiz: Path | None = None) -> Path | None:
+    """Tira o `data/` do usuario de dentro de `dist/` antes da limpeza.
+
+    `config._dirs()` poe a pasta gravavel AO LADO do executavel quando o app
+    esta' congelado - entao binds, alvo, ajustes e catalogo de quem usa o .exe
+    moram em `dist/d4forge/data/`. E `limpar()` apaga `dist/` inteiro.
+
+    O resultado e' que recompilar apagava a configuracao do usuario. Nao e'
+    hipotese: aconteceu, e mais de uma vez na mesma sessao - quem estava
+    testando perdeu as binds a cada build.
+    """
+    origem = (raiz or ROOT) / "dist" / NOME / "data"
+    if not origem.is_dir():
+        return None
+    abrigo = Path(tempfile.mkdtemp(prefix=f"{NOME}-data-"))
+    destino = abrigo / "data"
+    shutil.move(str(origem), str(destino))
+    print(f">> guardei {origem} durante o build")
+    return destino
+
+
+def devolver_dados(guardado: Path | None, raiz: Path | None = None) -> None:
+    """Repoe o `data/` do usuario depois do build. Idempotente."""
+    if guardado is None or not Path(guardado).is_dir():
+        return
+    guardado = Path(guardado)
+    destino = (raiz or ROOT) / "dist" / NOME / "data"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    # O build novo pode ter criado um data/ proprio; o do usuario e' que vale.
+    if destino.exists():
+        shutil.rmtree(destino, ignore_errors=True)
+    shutil.move(str(guardado), str(destino))
+    shutil.rmtree(guardado.parent, ignore_errors=True)
+    print(f">> devolvi {destino}")
 
 
 def limpar() -> None:
@@ -158,8 +195,15 @@ def main() -> int:
     print(f"d4forge — gerando executável com {PY}")
     garantir_dependencias()
     icone = garantir_icone()
-    limpar()
-    empacotar(icone)
+
+    # O `finally` nao e' zelo excessivo: `limpar()` ABORTA quando o .exe esta'
+    # aberto, e sem isto a configuracao do usuario ficaria largada no temporario.
+    guardado = guardar_dados()
+    try:
+        limpar()
+        empacotar(icone)
+    finally:
+        devolver_dados(guardado)
 
     destino = ROOT / "dist" / NOME
     conferir(destino)

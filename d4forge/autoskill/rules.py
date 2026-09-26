@@ -232,16 +232,23 @@ class AutoCastConfig:
         )
 
     def ordem_de_cast(self) -> list[tuple[int, SlotConfig]]:
-        """Slots que agem sozinhos, na ordem de prioridade.
+        """Tudo que age sozinho, na ordem de prioridade.
 
         `(indice, config)` porque o indice e' o que liga a configuracao ao slot
         LIDO na tela - a prioridade reordena a lista sem mexer nisso.
+
+        Os extras entram no fim com indice deslocado (6, 7, ...), fora da faixa
+        dos slots da barra. Nao e' gambiarra de numeracao: eles nunca estao em
+        modo cooldown - nao ha' icone na tela para ler -, entao o indice deles
+        jamais e' usado para consultar a leitura. Servir na mesma lista e' o
+        que os poe no mesmo rodizio dos numerados.
         """
-        numerados = [
-            (i, s) for i, s in enumerate(self.slots) if s.age_sozinho
+        fila = [(i, s) for i, s in enumerate(self.slots) if s.age_sozinho]
+        fila += [
+            (SLOTS + i, s) for i, s in enumerate(self.extras) if s.age_sozinho
         ]
-        numerados.sort(key=lambda par: (par[1].prioridade, par[0]))
-        return numerados
+        fila.sort(key=lambda par: (par[1].prioridade, par[0]))
+        return fila
 
 
 def _repetidores_padrao() -> list[Repetidor]:

@@ -35,6 +35,12 @@ from .vision import LeitorDeCooldown, ler_vida
 # si tem cada uma o seu intervalo.
 TIQUE_S = 0.025
 
+# Carencia depois de apertar um slot. O jogo leva um ou dois quadros para
+# escurecer o icone, entao o tique seguinte ainda le' "pronta" e apertaria a
+# mesma tecla de novo. Sem isto, o slot de maior prioridade monopolizava o
+# ciclo e os outros nunca chegavam a vez.
+GRACA_APOS_DISPARO_S = 0.30
+
 # Ritmo do aviso de estado para a interface. Emitir a cada tique encheria o
 # painel com quarenta mensagens por segundo sem dizer nada de novo.
 AVISO_S = 0.2
@@ -99,6 +105,10 @@ class AutoSkillEngine:
         self._listener = listener
         self._cancel = False
         self._captura = None
+        # De onde a fila recomeca, e quando cada slot disparou pela ultima vez.
+        # Os dois existem pelo mesmo motivo: repartir as vezes entre os slots.
+        self._ultimo_slot = -1
+        self._disparado_em: dict[int, float] = {}
         self._leitor = LeitorDeCooldown(len(config.cast.slots))
 
     # -- controle ---------------------------------------------------------
@@ -162,7 +172,7 @@ class AutoSkillEngine:
                     )
 
                 if ligados.get("cast") and agora >= proxima["cast"]:
-                    if self._talvez_castar(quadro, perfil, estado):
+                    if self._talvez_castar(quadro, perfil, estado, agora):
                         proxima["cast"] = agora + cfg.cast.intervalo_ms / 1000
 
                 for rep in cfg.repetidores:
@@ -219,7 +229,7 @@ class AutoSkillEngine:
             for s in self.config.cast.slots
         )
 
-    def _talvez_castar(self, quadro, perfil, estado) -> bool:
+    def _talvez_castar(self, quadro, perfil, estado, agora) -> bool:
         cfg = self.config.cast
         prontos: list[bool] = []
         if quadro is not None and perfil is not None:
@@ -227,21 +237,43 @@ class AutoSkillEngine:
             prontos = [not e.em_cooldown for e in leitura]
             estado.slots_prontos = prontos
 
-        for indice, slot in cfg.ordem_de_cast():
+        for indice, slot in self._rodizio(cfg.ordem_de_cast()):
             if slot.modo is ModoDoSlot.COOLDOWN:
                 # Sem leitura nao ha' como saber; nao chuta.
                 if indice >= len(prontos) or not prontos[indice]:
                     continue
+                # `-inf` e nao zero: zero significaria "disparou no instante
+                # zero", e "nunca disparou" tem de ser inequivoco.
+                ultimo = self._disparado_em.get(indice, float("-inf"))
+                if agora - ultimo < GRACA_APOS_DISPARO_S:
+                    continue
             if binds.disparar(slot.bind):
-                estado.ultima_acao = f"slot {indice + 1}"
-                return True
-
-        # Os extras (mouse e roda) nao tem slot na tela, entao so' spam.
-        for slot in cfg.extras:
-            if slot.modo is ModoDoSlot.SPAM and binds.disparar(slot.bind):
-                estado.ultima_acao = slot.bind.descreve()
+                self._ultimo_slot = indice
+                # `agora`, e nao `time.monotonic()` de novo: a carencia e'
+                # comparada com o mesmo valor que o tique recebeu, e misturar
+                # as duas leituras do relogio deixava a conta sem sentido.
+                self._disparado_em[indice] = agora
+                estado.ultima_acao = (
+                    f"slot {indice + 1}" if indice < len(self.config.cast.slots)
+                    else slot.bind.descreve()
+                )
                 return True
         return False
+
+    def _rodizio(self, fila):
+        """A mesma fila, recomecando DEPOIS do ultimo que disparou.
+
+        Sem isto a varredura reiniciava sempre no topo e so' a habilidade de
+        maior prioridade era usada: ela disparava, o laco saia, e no tique
+        seguinte ela era a primeira a ser testada outra vez. A prioridade
+        define a ORDEM do rodizio, nao um monopolio do primeiro - foi
+        exatamente o que o pedido descreveu, "quando mais de uma estiver
+        disponivel ao mesmo tempo".
+        """
+        for i, (indice, _slot) in enumerate(fila):
+            if indice == self._ultimo_slot:
+                return fila[i + 1:] + fila[:i + 1]
+        return fila
 
     def _talvez_beber(self, quadro, perfil, estado, agora, proxima) -> float:
         cfg = self.config.potion

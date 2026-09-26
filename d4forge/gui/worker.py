@@ -57,6 +57,34 @@ class TemperWorker(QThread):
         self._engine.cancel()
 
 
+class AutoSkillWorker(QThread):
+    """Roda o laco do AutoSkill fora da thread da interface.
+
+    Diferente dos outros: nao termina sozinho e nao tem `Outcome`. Ele gira
+    ate' mandarem parar, e o que emite e' RETRATO do estado - quais recursos
+    estao ligados, quanta vida o orbe mostra, quais slots estao prontos - para
+    o indicador da aba.
+    """
+
+    estado = Signal(object)    # EstadoAutoSkill
+
+    def __init__(self, engine, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._engine = engine
+        self._engine._listener = self._on_event
+
+    def _on_event(self, evt) -> None:
+        retrato = evt.data.get("estado")
+        if retrato is not None:
+            self.estado.emit(retrato)
+
+    def run(self) -> None:
+        self._engine.run()
+
+    def stop(self) -> None:
+        self._engine.cancel()
+
+
 class WarmupWorker(QThread):
     """Carrega o modelo de OCR em segundo plano assim que a janela abre.
 

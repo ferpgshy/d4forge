@@ -52,6 +52,7 @@ from .frameless import (
     geometria_salva,
     restaurar_geometria,
 )
+from .autoskill_tab import AutoSkillTab
 from .mw_tab import MasterworkTab
 from .progress import ProgressPanel
 from .responsive import (
@@ -61,7 +62,12 @@ from .responsive import (
     trocar_conteudo,
 )
 from .temper_tab import TemperTab
-from .worker import EngineWorker, TemperWorker, WarmupWorker
+from .worker import (
+    AutoSkillWorker,
+    EngineWorker,
+    TemperWorker,
+    WarmupWorker,
+)
 
 VK_F9 = 0x78
 VK_F10 = 0x79
@@ -195,6 +201,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.engine_worker: EngineWorker | None = None
         self.temper_worker: TemperWorker | None = None
         self.mw_worker: TemperWorker | None = None
+        self.autoskill_worker: AutoSkillWorker | None = None
         # Enquanto isto está ligado, mexer nos campos do alvo não grava nada -
         # ver `_reload_target`.
         self._carregando_alvo = False
@@ -245,9 +252,11 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._area_enchant = pagina_rolavel(self._build_panel())
         self._area_temper = pagina_rolavel(self._build_temper())
         self._area_mw = pagina_rolavel(self._build_mw())
+        self._area_autoskill = pagina_rolavel(self._build_autoskill())
         self.tabs.addTab(self._area_enchant, t("tab.enchant"))
         self.tabs.addTab(self._area_temper, t("tab.temper"))
         self.tabs.addTab(self._area_mw, t("tab.mw"))
+        self.tabs.addTab(self._area_autoskill, t("tab.autoskill"))
         self.tabs.addTab(self._build_catalog(), t("tab.catalog"))
         # A tabela do catálogo tem ~880 linhas: montá-la só quando alguém abre a
         # aba tira quase um segundo da abertura e da troca de idioma.
@@ -273,6 +282,8 @@ class MainWindow(FramelessMixin, QMainWindow):
 
         # Carrega o leitor agora, para o custo de partida não cair sobre a
         # primeira leitura do ciclo.
+        self._iniciar_autoskill()
+
         self._warmup = WarmupWorker(self.app)
         self._warmup.ready.connect(lambda ms: self._note("msg.ocr_ready", ms=ms))
         self._warmup.start()
@@ -460,7 +471,8 @@ class MainWindow(FramelessMixin, QMainWindow):
             trocar_conteudo(self._area_enchant, self._build_panel())
             self._retranslate_catalog()
             for i, chave in enumerate(
-                ("tab.enchant", "tab.temper", "tab.mw", "tab.catalog")
+                ("tab.enchant", "tab.temper", "tab.mw", "tab.autoskill",
+                 "tab.catalog")
             ):
                 self.tabs.setTabText(i, t(chave))
             self.tabs.setCurrentIndex(indice)
@@ -475,6 +487,7 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.temper_tab.retranslate()
             self.btn_temper.setText(f"{t('temper.start')}   ·   F10")
             self.btn_temper_stop.setText(f"{t('panel.stop')}   ·   F12")
+            self.autoskill_tab.retranslate()
             self.mw_tab.retranslate()
             self.btn_mw.setText(f"{t('mw.start')}   ·   F11")
             self.btn_mw_stop.setText(f"{t('panel.stop')}   ·   F12")
@@ -1247,6 +1260,72 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.mw_tab.set_status(outcome.reason, erro=not outcome.found)
         self.app.save()
 
+    # ----------------------------------------------------------- autoskill
+    def _build_autoskill(self) -> QWidget:
+        # Um so' painel para a vida toda da janela, como os outros tres: a
+        # troca de idioma reaproveita a aba, e uma aba nova perderia o que
+        # estava ligado e as binds ainda nao gravadas.
+        # Sem par Ligar/Desligar, de proposito. As hotkeys JA' sao o
+        # liga/desliga, uma por recurso - um botao antes delas significaria
+        # abrir o app, clicar aqui, e so' entao ir para o jogo. O laco sobe
+        # junto com a janela (ver `_iniciar_autoskill`) e custa 0,3% de um
+        # nucleo parado, entao nao ha' o que economizar deixando-o desligado.
+        if not hasattr(self, "autoskill_tab"):
+            self.autoskill_tab = AutoSkillTab(config.load_autoskill())
+            self.autoskill_tab.mudou.connect(self._save_autoskill)
+        return self.autoskill_tab
+
+    def _save_autoskill(self) -> None:
+        """Grava o que a aba mostra.
+
+        `goal()` edita a MESMA configuracao que o motor esta' segurando, entao
+        a troca de uma bind vale no laco em andamento - nao ha' o que
+        reiniciar (ver `AutoSkillEngine._sincronizar`).
+        """
+        config.save_autoskill(self.autoskill_tab.goal())
+
+    def _salvar_tudo(self) -> None:
+        """Grava o que CADA aba tem na tela agora.
+
+        Cada uma gravava num momento diferente: o alvo do Enchant com meio
+        segundo de atraso, Tempering e Masterworking so' ao apertar Iniciar, o
+        catalogo so' pelo botao, o AutoSkill com 400 ms de atraso. Fechar a
+        janela logo depois de mexer perdia a mexida - e "mexer e fechar" e'
+        justamente o que se faz com configuracao.
+
+        Estar tudo num lugar so' e' o ponto: a aba seguinte que alguem criar
+        entra aqui, em vez de nascer com o mesmo buraco.
+        """
+        # `silencioso`: quem escreve o rules.json e' o `app.save()` logo
+        # adiante, e gravar duas vezes so' dobraria a escrita.
+        self._save_target(silencioso=True)
+        if hasattr(self, "temper_tab"):
+            config.save_temper_goal(self.temper_tab.goal())
+        if hasattr(self, "mw_tab"):
+            config.save_mw_goal(self.mw_tab.goal())
+        if hasattr(self, "autoskill_tab"):
+            self._save_autoskill()
+        # Nao faz nada se a tabela nunca foi montada - ver `_save_catalog`.
+        self._save_catalog()
+
+    def _iniciar_autoskill(self) -> None:
+        """Poe o laco no ar junto com a janela.
+
+        O que decide se algo acontece sao as hotkeys de cada recurso, e elas
+        so' podem ser ouvidas por um laco que ja' esteja rodando. Exigir um
+        clique antes disso obrigaria a voltar ao app toda vez que o jogo
+        fechasse a sessao - era o passo que nao servia para nada.
+        """
+        if self.autoskill_worker and self.autoskill_worker.isRunning():
+            return
+        from ..autoskill.engine import AutoSkillEngine
+
+        engine = AutoSkillEngine(self.autoskill_tab.goal(), self.app.settings)
+        self.autoskill_worker = AutoSkillWorker(engine)
+        self.autoskill_worker.estado.connect(self.autoskill_tab.mostrar_estado)
+        self.autoskill_worker.start()
+        self.autoskill_tab.set_status(t("as.listening"))
+
     def _on_event(self, evt: EngineEvent) -> None:
         self.progress.push(evt)
         if evt.kind is EventKind.READ:
@@ -1271,11 +1350,17 @@ class MainWindow(FramelessMixin, QMainWindow):
         if self.engine_worker and self.engine_worker.isRunning():
             self.engine_worker.stop()
             self.engine_worker.wait(2000)
+        # O laco do AutoSkill nao termina sozinho: sem isto, fechar a janela
+        # deixaria uma thread apertando teclas no jogo.
+        if self.autoskill_worker and self.autoskill_worker.isRunning():
+            self.autoskill_worker.stop()
+            self.autoskill_worker.wait(2000)
         # O aquecimento do OCR leva ~300 ms depois de a janela abrir. Fechar
         # nesse intervalo destruía uma QThread em execução — comportamento
         # indefinido, e o processo caía com 0xC0000409 no encerramento.
         if self._warmup.isRunning():
             self._warmup.wait(3000)
+        self._salvar_tudo()
         self._collect_settings()
         # Onde e de que tamanho a janela estava, para reabrir assim. Gravado
         # antes de `save`, que é quem escreve o settings.json.

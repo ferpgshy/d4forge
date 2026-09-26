@@ -207,6 +207,41 @@ def save_mw_goal(goal, path: Path | None = None) -> None:
     )
 
 
+AUTOSKILL_PATH = DATA_DIR / "autoskill.json"
+
+
+def load_autoskill(path: Path | None = None):
+    """Configuracao do AutoSkill salva. Devolve o padrao se nao houver arquivo.
+
+    Mesma blindagem do Tempering e do Masterworking, e pelo mesmo motivo: isto
+    roda na montagem da janela, entao um arquivo estragado aqui nao estraga uma
+    preferencia - impede o app de ABRIR. Aqui o cuidado pesa mais do que nos
+    outros dois: o arquivo guarda BINDS, e uma bind invalida nao pode levar a
+    aba inteira junto (ver `Bind.from_json`).
+    """
+    from .autoskill.rules import AutoSkillConfig
+
+    caminho = path or AUTOSKILL_PATH
+    if not caminho.exists():
+        return AutoSkillConfig()
+    try:
+        return AutoSkillConfig.from_json(
+            json.loads(caminho.read_text(encoding="utf-8"))
+        )
+    except Exception:  # noqa: BLE001 - ver o comentario acima
+        log.warning("autoskill.json ilegível; usando o padrão", exc_info=True)
+        return AutoSkillConfig()
+
+
+def save_autoskill(config, path: Path | None = None) -> None:
+    caminho = path or AUTOSKILL_PATH
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_text(
+        json.dumps(config.to_json(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)

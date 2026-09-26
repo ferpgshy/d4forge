@@ -9,7 +9,8 @@ Modulos:
     rules      criterios de aceite
     automation input sintetico e atalhos globais
     engine     maquina de estados do encantamento
+    autoskill  disparo de habilidades, pocao, portal e esquiva
     gui        interface PySide6
 """
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"

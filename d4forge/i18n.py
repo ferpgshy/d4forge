@@ -34,6 +34,71 @@ STRINGS: dict[str, dict[str, str]] = {
         "window.close": "Fechar",
         # -- abas
         "tab.enchant": "Enchant",
+        "tab.autoskill": "AutoSkill",
+        # -- AutoSkill
+        "as.hint": (
+            "Substitui a macro do mouse/teclado. Não tem botão de ligar: as "
+            "hotkeys abaixo são o liga/desliga, e só agem com o Diablo IV em "
+            "primeiro plano."
+        ),
+        "as.skills_box": "Habilidades",
+        "as.slot": "Slot",
+        "as.bind": "Tecla",
+        "as.mode": "Modo",
+        "as.priority": "Prioridade",
+        "as.priority_tip": (
+            "Menor vai primeiro quando mais de uma habilidade fica pronta no "
+            "mesmo instante. Empate resolve pela ordem do slot."
+        ),
+        "as.interval": "Intervalo entre ações",
+        "as.interval_tip": (
+            "Tempo mínimo entre dois disparos. Abaixo de ~80 ms o jogo começa "
+            "a engolir teclas."
+        ),
+        "as.extras": "Mouse e roda",
+        "as.extras_hint": (
+            "Botões do mouse e roda não têm slot na barra, então não dá para "
+            "ler cooldown deles — só spam."
+        ),
+        "as.add_extra": "Adicionar botão do mouse",
+        "as.remove": "Remover",
+        "as.potion_box": "Poção",
+        "as.potion_below": "Beber abaixo de",
+        "as.potion_cd": "Cooldown da poção",
+        "as.potion_shield": "beber mesmo sem enxergar a vida (escudo)",
+        "as.potion_shield_tip": (
+            "Com barreira cobrindo o orbe, a vida não está visível na tela. "
+            "Por padrão o ciclo segura a poção em vez de chutar."
+        ),
+        "as.repeaters_box": "Repetidores",
+        "as.repeaters_hint": (
+            "Não leem nada da tela: apertam a bind no intervalo, enquanto "
+            "estiverem ligados."
+        ),
+        "as.dodge": "Esquiva",
+        "as.tp": "Portal",
+        "as.control": "Liga/desliga",
+        "as.activation": "Ativação",
+        "as.toggle": "Toggle",
+        "as.hold": "Segurar",
+        "as.mode_cooldown": "Manter em cooldown",
+        "as.mode_spam": "Spam",
+        "as.mode_manual": "Manual / ignorar",
+        "as.capture": "clique e aperte",
+        "as.capturing": "aperte agora…",
+        "as.unset": "—",
+        "as.clear": "Limpar",
+        "as.listening": (
+            "No ar desde que o app abriu — cada recurso liga pela hotkey dele, "
+            "com o Diablo IV em primeiro plano."
+        ),
+        "as.idle": "Configure as binds abaixo.",
+        "as.no_focus": "Diablo IV não está em primeiro plano",
+        "as.life": "Vida",
+        "as.shield": "Escudo",
+        "as.unknown": "?",
+        "as.ready": "prontas",
+        "as.needs_bind": "Nenhuma habilidade configurada com tecla.",
         "tab.catalog": "Catálogo",
         # -- painel
         "panel.idle": "Parado",
@@ -362,6 +427,70 @@ STRINGS: dict[str, dict[str, str]] = {
         "window.restore": "Restore",
         "window.close": "Close",
         "tab.enchant": "Enchant",
+        "tab.autoskill": "AutoSkill",
+        "as.hint": (
+            "Replaces the mouse/keyboard macro. There is no enable button: the "
+            "hotkeys below are the switch, and they only act while Diablo IV "
+            "is in the foreground."
+        ),
+        "as.skills_box": "Skills",
+        "as.slot": "Slot",
+        "as.bind": "Key",
+        "as.mode": "Mode",
+        "as.priority": "Priority",
+        "as.priority_tip": (
+            "Lower goes first when more than one skill comes off cooldown at "
+            "the same moment. Ties break by slot order."
+        ),
+        "as.interval": "Interval between actions",
+        "as.interval_tip": (
+            "Minimum time between two presses. Below ~80 ms the game starts "
+            "swallowing keys."
+        ),
+        "as.extras": "Mouse and wheel",
+        "as.extras_hint": (
+            "Mouse buttons and the wheel have no slot on the bar, so their "
+            "cooldown cannot be read — spam only."
+        ),
+        "as.add_extra": "Add mouse button",
+        "as.remove": "Remove",
+        "as.potion_box": "Potion",
+        "as.potion_below": "Drink below",
+        "as.potion_cd": "Potion cooldown",
+        "as.potion_shield": "drink even when health is hidden (barrier)",
+        "as.potion_shield_tip": (
+            "With a barrier covering the orb, health is not visible on screen. "
+            "By default the loop holds the potion instead of guessing."
+        ),
+        "as.repeaters_box": "Repeaters",
+        "as.repeaters_hint": (
+            "They read nothing from the screen: they press the bind on the "
+            "interval while enabled."
+        ),
+        "as.dodge": "Evade",
+        "as.tp": "Town portal",
+        "as.control": "Toggle key",
+        "as.activation": "Activation",
+        "as.toggle": "Toggle",
+        "as.hold": "Hold",
+        "as.mode_cooldown": "Keep off cooldown",
+        "as.mode_spam": "Spam",
+        "as.mode_manual": "Manual / ignore",
+        "as.capture": "click and press",
+        "as.capturing": "press now…",
+        "as.unset": "—",
+        "as.clear": "Clear",
+        "as.listening": (
+            "Live since the app opened — each feature is driven by its own "
+            "hotkey, with Diablo IV in the foreground."
+        ),
+        "as.idle": "Set the binds below.",
+        "as.no_focus": "Diablo IV is not in the foreground",
+        "as.life": "Health",
+        "as.shield": "Barrier",
+        "as.unknown": "?",
+        "as.ready": "ready",
+        "as.needs_bind": "No skill has a key configured.",
         "tab.catalog": "Catalog",
         "panel.idle": "Idle",
         "panel.running": "Running",

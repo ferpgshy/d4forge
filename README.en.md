@@ -290,6 +290,58 @@ the tabs for long labels without wrapping.
 
 ---
 
+## AutoSkill
+
+Replaces the LGHUB macro. **There is no enable button**: the loop starts with
+the app and the hotkeys you configure are the switch, one per feature. It only
+acts while Diablo IV is in the foreground.
+
+| feature | what it does |
+|---|---|
+| **AutoCast** | per slot: recast when it leaves cooldown, spam, or hands off |
+| **AutoPotion** | drinks below X% health, respecting the potion cooldown |
+| **Evade / Portal** | press the bind on an interval, reading nothing |
+
+Every bind is captured by click-and-press and accepts a **key, a mouse button
+(side buttons included) or the wheel**. Each control hotkey works as a
+**toggle** or as **hold**.
+
+### How it knows a skill left cooldown
+
+By **brightness**, not color — there are over a hundred skills in the game and
+each has its own palette. Measured on the reference shots, six slots each:
+
+| | available | on cooldown |
+|---|---|---|
+| brightness of the brightest decile | 226 – 234 | 89 – 94 |
+
+130 points of margin, not a single overlap. No OCR needed: reading the
+countdown would cost 20-30 ms **per slot** in a loop running 40 times a second,
+and it is redundant — the dimming alone separates the two states.
+
+The threshold is not fixed either, because some icons are naturally dark: the
+reader keeps the highest brightness ever seen **for that slot** and only learns
+from frames without cooldown. It converges within the first second of play and
+asks for no calibration.
+
+### How it reads health
+
+By the **edge** between full and empty, and the criterion is "**empty is
+black**" — not "full is red". It sounds like the same thing inverted and it is
+not: what fills the orb changes color (plain red, desaturated pink under a
+shield, blue when the barrier covers everything), while empty is always the
+same black.
+
+The difference was measured: **at full health with a barrier up**, the red
+criterion read 89% — a threshold at 90% would drink a potion at full health.
+The dark criterion reads 99%.
+
+A barrier covering the whole orb reads as full health. That is not a flaw in
+the method: with the shield on top, the health underneath is not visible to
+anyone.
+
+---
+
 ## Affix catalog
 
 **There is no official Blizzard API for Diablo IV data.** The Battle.net Game

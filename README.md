@@ -285,6 +285,55 @@ que varre as abas atrás de rótulos longos sem quebra.
 
 ---
 
+## AutoSkill
+
+Substitui a macro do LGHUB. **Não tem botão de ligar**: o laço sobe junto com o
+app e as hotkeys que você configurar são o liga/desliga, uma por recurso. Só
+age com o Diablo IV em primeiro plano.
+
+| recurso | o que faz |
+|---|---|
+| **AutoCast** | por slot: recastar ao sair do cooldown, spam, ou não encostar |
+| **AutoPotion** | bebe abaixo de X% de vida, respeitando o cooldown da poção |
+| **Esquiva / Portal** | apertam a bind no intervalo, sem ler nada da tela |
+
+Cada bind é capturada por clique-e-aperte e aceita **tecla, botão do mouse
+(inclusive os laterais) ou roda**. Cada hotkey de controle funciona em
+**toggle** (um toque liga, outro desliga) ou **segurar**.
+
+### Como ele sabe que a habilidade saiu do cooldown
+
+Pelo **brilho**, não pela cor — são mais de cem habilidades no jogo e cada uma
+tem a sua paleta. Medido nos prints de referência, seis slots cada:
+
+| | disponível | em cooldown |
+|---|---|---|
+| brilho do decil mais claro | 226 – 234 | 89 – 94 |
+
+São 130 pontos de margem, sem uma sobreposição. Não precisa de OCR: ler o
+número da contagem custaria 20-30 ms **por slot** num laço que roda 40 vezes por
+segundo, e é redundante — o escurecimento sozinho já separa os dois estados.
+
+E o limiar não é fixo, porque existe ícone naturalmente escuro: o leitor guarda
+o maior brilho já visto **naquele slot** e só aprende com quadros sem cooldown.
+Converge no primeiro segundo de jogo e não pede calibração.
+
+### Como ele lê a vida
+
+Pela **borda** entre o cheio e o vazio, e o critério é "**o vazio é preto**" —
+não "o cheio é vermelho". Parece a mesma coisa invertida e não é: o que enche o
+orbe muda de cor (vermelho normal, rosa dessaturado sob escudo, azul quando a
+barreira cobre tudo), enquanto o vazio é sempre o mesmo preto.
+
+A diferença foi medida: **com vida cheia e barreira ativa**, o critério por
+vermelho lia 89% — um limiar em 90% mandaria beber poção com a vida intacta. O
+critério por escuro lê 99%.
+
+Barreira cobrindo o orbe inteiro é lida como vida cheia. Não é defeito do
+método: com o escudo por cima, a vida embaixo não está visível para ninguém.
+
+---
+
 ## Catálogo de afixos
 
 **Não existe API oficial da Blizzard para dados do Diablo IV.** O Battle.net Game

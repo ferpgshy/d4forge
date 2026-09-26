@@ -232,7 +232,7 @@ def test_janela_cabe_numa_tela_pequena(janela):
 LIMITE_SEM_QUEBRA = 40
 
 
-@pytest.mark.parametrize("aba", [0, 1, 2, 3])
+@pytest.mark.parametrize("aba", [0, 1, 2, 3, 4])
 def test_rotulo_comprido_tem_de_quebrar_linha(janela, aba):
     """Um rótulo longo que não quebra fixa sozinho a largura mínima da aba, e
     com ela a da janela — foi assim que o mínimo chegou a 880.
@@ -328,9 +328,10 @@ def test_troca_de_idioma_preserva_a_sessao(janela):
 
     assert janela.progress is painel, "o painel foi refeito"
     assert len(painel._events) >= eventos
-    assert janela.tabs.count() == 4
-    assert [janela.tabs.tabText(i) for i in range(4)] == [
-        t("tab.enchant"), t("tab.temper"), t("tab.mw"), t("tab.catalog")
+    assert janela.tabs.count() == 5
+    assert [janela.tabs.tabText(i) for i in range(5)] == [
+        t("tab.enchant"), t("tab.temper"), t("tab.mw"),
+        t("tab.autoskill"), t("tab.catalog"),
     ]
     # A página do Enchant é a única refeita, e tem de continuar dentro da área
     # de rolagem — fora dela a aba volta a não encolher.
@@ -348,3 +349,69 @@ def test_geometria_e_salva_ao_fechar(qt_app, config_isolada):
     assert w.app.settings.window_geometry
     salvo = config.Settings.load(config.SETTINGS_PATH)
     assert salvo.window_geometry == w.app.settings.window_geometry
+
+
+# ------------------------------------------------- o que sobrevive ao fechar
+def _reabre(config_isolada):
+    from d4forge.gui.app import AppState, MainWindow
+
+    return MainWindow(AppState.load())
+
+
+def test_fechar_grava_o_que_esta_na_tela_em_todas_as_abas(qt_app, config_isolada):
+    """Cada aba gravava num momento diferente — o alvo com meio segundo de
+    atraso, Tempering e Masterworking só ao apertar Iniciar, o catálogo só
+    pelo botão. Fechar logo depois de mexer perdia a mexida, e "mexer e
+    fechar" é justamente o que se faz com configuração."""
+    from d4forge.automation.binds import botao_mouse, tecla, VK_XBUTTON1
+    from d4forge.autoskill.rules import ModoDoSlot
+
+    janela = _reabre(config_isolada)
+    janela.autoskill_tab.linhas[0].bind.set_bind(tecla(0x31, "1"))
+    janela.autoskill_tab.linhas[0].modo.setCurrentIndex(
+        list(ModoDoSlot).index(ModoDoSlot.COOLDOWN)
+    )
+    janela.autoskill_tab.ctrl_cast.bind.set_bind(tecla(0x70, "F1"))
+    janela.autoskill_tab.repetidores["dodge"]["bind"].set_bind(
+        botao_mouse(VK_XBUTTON1)
+    )
+    janela.autoskill_tab.spin_limiar.setValue(62)
+    janela.temper_tab.txt_affix.setText("Attack Speed")
+    janela.mw_tab.cmb_affix.setCurrentText("Maximum Life")
+    janela.cmb_affix.setCurrentText("Dodge Chance")
+    janela.spin_attempts.setValue(777)
+    janela.close()                      # sem esperar atraso nenhum
+
+    outra = _reabre(config_isolada)
+    try:
+        aba = outra.autoskill_tab
+        assert aba.linhas[0].bind.bind().descreve() == "1"
+        assert aba.linhas[0].modo.currentData() is ModoDoSlot.COOLDOWN
+        assert aba.ctrl_cast.bind.bind().codigo == 0x70
+        assert aba.repetidores["dodge"]["bind"].bind().codigo == VK_XBUTTON1
+        assert aba.spin_limiar.value() == 62
+        assert outra.temper_tab.txt_affix.text() == "Attack Speed"
+        assert outra.mw_tab.cmb_affix.currentText() == "Maximum Life"
+        assert outra.cmb_affix.currentText() == "Dodge Chance"
+        assert outra.spin_attempts.value() == 777
+    finally:
+        outra.close()
+
+
+def test_a_recarga_do_tempering_NAO_volta_e_isso_e_de_proposito(qt_app, config_isolada):
+    """A exceção à regra acima, e ela tem custo: recarregar gasta Pergaminhos.
+    Reabrir o app já autorizado a gastar seria uma surpresa cara, então a
+    política volta sempre em "parar e avisar"."""
+    from d4forge.temper.rules import Recharge
+
+    janela = _reabre(config_isolada)
+    janela.temper_tab.rb_full.setChecked(True)
+    assert janela.temper_tab.goal().recharge is Recharge.FULL
+    janela.close()
+
+    outra = _reabre(config_isolada)
+    try:
+        assert outra.temper_tab.goal().recharge is Recharge.STOP
+        assert outra.temper_tab.rb_stop.isChecked()
+    finally:
+        outra.close()

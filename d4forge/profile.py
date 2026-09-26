@@ -180,12 +180,26 @@ class ResolvedProfile:
     def rects(self, refs, anchor: str = ANCHOR_LEFT) -> list[Rect]:
         return [self.rect(r, anchor) for r in refs]
 
+    def _anchor_for(self, name: str) -> str:
+        """Qual ancora vale para este campo.
+
+        Quem manda e' o PERFIL BASE, nao esta tabela. O painel do Occultist
+        vive preso a' esquerda com algumas excecoes centralizadas, mas o HUD de
+        combate e' centralizado POR INTEIRO - medido nos prints, o bloco
+        orbe+barra tem meio em x 971 contra centro de tela 959. Um perfil novo
+        diz isso declarando `ANCORA_PADRAO`, em vez de esta classe ganhar um
+        `if` por aba.
+        """
+        centralizadas = getattr(self.base, "CENTRALIZADAS", CENTERED_ROIS)
+        padrao = getattr(self.base, "ANCORA_PADRAO", ANCHOR_LEFT)
+        return ANCHOR_CENTER if name in centralizadas else padrao
+
     def __getattr__(self, name: str):
         """Espelha os campos do perfil base ja' convertidos."""
         if name.startswith("_"):
             raise AttributeError(name)
         value = getattr(self.base, name)
-        anchor = ANCHOR_CENTER if name in CENTERED_ROIS else ANCHOR_LEFT
+        anchor = self._anchor_for(name)
         if isinstance(value, Rect):
             return self.rect(value, anchor)
         if isinstance(value, tuple) and value and isinstance(value[0], Rect):

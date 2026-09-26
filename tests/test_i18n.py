@@ -65,9 +65,9 @@ def test_versao_final_da_interface(qt_app, config_isolada):
 
     janela = MainWindow(AppState.load())
     try:
-        # uma aba por fluxo (Enchant, Tempering, Masterworking) mais o
-        # Catálogo, que é dos três
-        assert janela.tabs.count() == 4
+        # uma aba por fluxo (Enchant, Tempering, Masterworking, AutoSkill)
+        # mais o Catálogo, que é dos três de crafting
+        assert janela.tabs.count() == 5
         # o alvo virou cartão dentro do Enchant, não uma aba à parte
         assert janela.cmb_affix is not None
         # modo simulação saiu da interface
@@ -204,14 +204,14 @@ def test_troca_de_idioma_redesenha_a_janela(qt_app, config_isolada):
     janela = MainWindow(AppState.load())
     try:
         janela._set_language("en")
-        assert [janela.tabs.tabText(i) for i in range(4)] == [
-            "Enchant", "Tempering", "Masterworking", "Catalog"
+        assert [janela.tabs.tabText(i) for i in range(5)] == [
+            "Enchant", "Tempering", "Masterworking", "AutoSkill", "Catalog"
         ]
         assert janela.btn_start.text().startswith("Start")
 
         janela._set_language("pt-BR")
-        assert [janela.tabs.tabText(i) for i in range(4)] == [
-            "Enchant", "Tempering", "Masterworking", "Catálogo"
+        assert [janela.tabs.tabText(i) for i in range(5)] == [
+            "Enchant", "Tempering", "Masterworking", "AutoSkill", "Catálogo"
         ]
         assert janela.btn_start.text().startswith("Iniciar")
     finally:

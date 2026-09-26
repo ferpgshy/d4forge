@@ -146,15 +146,34 @@ def test_le_a_vida_pela_borda_do_liquido(nome, esperado):
     assert abs(leitura.porcentagem() - esperado) <= 3, leitura.descreve()
 
 
-def test_barreira_nao_derruba_a_leitura_de_vida_cheia(huds, perfil):
-    """Regressão medida: com escudo ativo e vida CHEIA, o critério por
-    "quanto do orbe é vermelho" lia 89% — e um limiar em 90% mandaria beber
-    poção com a vida intacta. O critério por "o vazio é preto" lê 99%."""
+def test_com_escudo_a_leitura_e_conservadora(huds, perfil):
+    """A regressão que MATAVA o personagem.
+
+    O critério "o vazio é preto" é exato sem escudo, mas a barreira é azul —
+    ou seja, não é preta. Com o orbe coberto, ele lia 99% com a vida no fim, a
+    poção nunca saía, e o personagem morria de vida cheia no indicador.
+
+    A vida por baixo do escudo não está na tela para ninguém. Então a leitura
+    passa a ser a MENOR entre o preenchimento total e o nível do vermelho —
+    errar para baixo custa uma carga de poção, errar para cima custa a vida.
+    """
     for tela in ("cd1", "cd2"):          # os dois quadros têm barreira ativa
         leitura = ler_vida(huds[tela], perfil.health_orb)
         assert leitura.confiavel
-        assert leitura.porcentagem() >= 95, f"{tela}: {leitura.descreve()}"
-        assert leitura.barreira > 0.1, "estes quadros deveriam ter escudo"
+        assert leitura.com_escudo, f"{tela}: deveria acusar escudo"
+        assert leitura.barreira > 0.1
+        # Conservadora: abaixo do que o critério otimista devolvia (99%).
+        assert leitura.porcentagem() < 95, f"{tela}: {leitura.descreve()}"
+        # E não pode desabar a ponto de beber poção à toa com a vida cheia.
+        assert leitura.porcentagem() > 70, f"{tela}: {leitura.descreve()}"
+
+
+def test_sem_escudo_a_leitura_nao_muda(huds, perfil):
+    """A ressalva acima só vale quando há escudo: sem ele, o critério exato
+    continua valendo inteiro."""
+    leitura = ler_vida(huds["pronto"], perfil.health_orb)
+    assert not leitura.com_escudo
+    assert leitura.porcentagem() >= 95, leitura.descreve()
 
 
 def test_orbe_todo_escuro_e_vida_no_fim():

@@ -134,9 +134,15 @@ class LeituraDeVida:
     def porcentagem(self) -> int:
         return int(round(self.fracao * 100))
 
+    @property
+    def com_escudo(self) -> bool:
+        return self.barreira >= BARREIRA_QUE_ESCONDE
+
     def descreve(self) -> str:
         if not self.confiavel:
-            return f"indeterminada (escudo em {self.barreira * 100:.0f}% do orbe)"
+            return "indeterminada"
+        if self.com_escudo:
+            return f"{self.porcentagem()}% (escudo)"
         return f"{self.porcentagem()}%"
 
 
@@ -153,6 +159,33 @@ class LeituraDeVida:
 # junto na leitura para a interface poder avisar.
 V_DE_VAZIO = 60
 LINHA_VAZIA = 0.6
+
+# Vermelho de sangue, nas duas pontas do circulo de matiz do OpenCV. Usado so'
+# como SEGUNDA opiniao, quando ha' escudo (ver `ler_vida`).
+def _mascara_vermelha(hsv: np.ndarray) -> np.ndarray:
+    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    return ((h <= 12) | (h >= 168)) & (s > 70) & (v > 40)
+
+
+# A partir desta fracao de azul no disco, ha' escudo por cima da vida.
+# Medido: sem barreira o azul fica em 0,6%; com barreira passa de 27%.
+BARREIRA_QUE_ESCONDE = 0.10
+
+
+def _nivel(mascara, cx, cy, raio, limiar) -> float:
+    """Altura da primeira linha que NAO e' majoritariamente `mascara`.
+
+    E' a superficie do liquido: o que esta' abaixo dela conta como cheio.
+    """
+    topo, base = cy - raio, cy + raio
+    for y in range(topo, base + 1):
+        largura = int((raio * raio - (y - cy) ** 2) ** 0.5)
+        if largura < 6:
+            continue
+        linha = mascara[y, cx - largura:cx + largura + 1]
+        if linha.size and linha.mean() < limiar:
+            return max(0.0, min(1.0, (base - y) / (base - topo)))
+    return 0.0
 
 
 def ler_vida(frame: np.ndarray, orbe) -> LeituraDeVida:
@@ -180,21 +213,22 @@ def ler_vida(frame: np.ndarray, orbe) -> LeituraDeVida:
         return LeituraDeVida(0.0, False, 0.0)
     fracao_azul = float((azul & disco).sum()) / pixels
 
-    # De cima para baixo: a primeira linha que NAO e' majoritariamente escura
-    # e' a superficie do liquido. O que esta' abaixo dela e' vida.
-    topo, base = cy - raio, cy + raio
-    for y in range(topo, base + 1):
-        largura = int((raio * raio - (y - cy) ** 2) ** 0.5)
-        if largura < 6:
-            continue
-        linha = escuro[y, cx - largura:cx + largura + 1]
-        if linha.size and linha.mean() < LINHA_VAZIA:
-            return LeituraDeVida(
-                max(0.0, min(1.0, (base - y) / (base - topo))), True, fracao_azul
-            )
+    # Sem escudo, "o vazio e' preto" e' exato: 97..99% com a vida cheia.
+    por_escuro = _nivel(escuro, cx, cy, raio, LINHA_VAZIA)
+    if fracao_azul < BARREIRA_QUE_ESCONDE:
+        return LeituraDeVida(por_escuro, True, fracao_azul)
 
-    # Disco escuro de ponta a ponta: vida no fim.
-    return LeituraDeVida(0.0, True, fracao_azul)
+    # Com escudo, a vida embaixo NAO esta' na tela. Antes isto devolvia o
+    # nivel do preenchimento total - e barreira cobrindo o orbe lia 99% com a
+    # vida no fim, entao a pocao nunca saia e o personagem morria.
+    #
+    # A segunda opiniao e' o nivel do VERMELHO, que o azul do escudo derruba:
+    # medido com vida cheia e barreira, ele le' 89% contra os 99% reais. Errar
+    # para BAIXO custa uma carga de pocao; errar para cima custa a vida.
+    vermelho = _mascara_vermelha(hsv)
+    # `~vermelho` porque `_nivel` procura onde a mascara DEIXA de dominar.
+    por_vermelho = _nivel(~vermelho, cx, cy, raio, LINHA_VAZIA)
+    return LeituraDeVida(min(por_escuro, por_vermelho), True, fracao_azul)
 
 
 __all__ = [

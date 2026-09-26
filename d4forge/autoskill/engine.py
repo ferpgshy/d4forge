@@ -8,10 +8,12 @@ Tres coisas moram aqui e vale dizer por que sao uma so' e nao tres:
 * **a captura acontece no maximo UMA vez por tique**, e so' se houver alguem
   que precise dela. Cast e pocao leem o mesmo quadro; esquiva e portal nao leem
   nada.
-* **uma acao de cast por tique.** Apertar tres teclas seguidas tomaria uns
-  150 ms de `sleep` dentro do tique (o aperto sintetico segura 30-55 ms para o
-  jogo registrar), e o laco perderia a janela da proxima leitura. A fila de
-  prioridade existe justamente para escolher UMA.
+* **UMA acao por tique, e a pocao na frente.** Cada aperto sintetico segura a
+  tecla 30-55 ms para o jogo registrar; deixar cast, esquiva e portal sairem no
+  MESMO tique fazia o tique passar de 150 ms, e a vida so' era relida depois
+  disso. Numa vida que cai, essa e' a diferenca entre beber a 30% e beber a
+  10%. Com uma acao por tique a leitura volta a ~18 Hz, e a pocao tem
+  precedencia sobre tudo.
 
 O portao de tudo e' o jogo estar em primeiro plano. Fora disso o laco continua
 girando - para ouvir as hotkeys - mas nao aperta nada.
@@ -19,6 +21,7 @@ girando - para ouvir as hotkeys - mas nao aperta nada.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 
@@ -44,6 +47,8 @@ GRACA_APOS_DISPARO_S = 0.30
 # Ritmo do aviso de estado para a interface. Emitir a cada tique encheria o
 # painel com quarenta mensagens por segundo sem dizer nada de novo.
 AVISO_S = 0.2
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -109,6 +114,7 @@ class AutoSkillEngine:
         # Os dois existem pelo mesmo motivo: repartir as vezes entre os slots.
         self._ultimo_slot = -1
         self._disparado_em: dict[int, float] = {}
+        self._ultimo_aviso = 0.0
         self._leitor = LeitorDeCooldown(len(config.cast.slots))
 
     # -- controle ---------------------------------------------------------
@@ -131,63 +137,83 @@ class AutoSkillEngine:
 
         agora = time.monotonic()
         proxima = {nome: agora for nome in gatilhos}
-        proxima["potion"] = agora
-        ultimo_aviso = 0.0
         estado = EstadoAutoSkill()
+        self._ultimo_aviso = 0.0
 
         # A captura nasce SO' quando alguem precisar de um quadro. O laco sobe
         # junto com o app e fica no ar a sessao inteira; abrir o dxcam ali
         # tomaria um dispositivo de video de quem talvez nunca ligue o
-        # AutoSkill - e, no caso de uma configuracao so' de spam, de quem nunca
-        # vai precisar dele.
+        # AutoSkill - e, numa configuracao so' de spam, de quem nunca vai
+        # precisar dele.
         self._captura = None
         try:
             while not self._cancel:
-                agora = time.monotonic()
-                self._sincronizar(gatilhos, proxima, agora)
-                ligados = {n: g.atualizar() for n, g in gatilhos.items()}
-                estado.ligados = dict(ligados)
-
-                janela = find_game_window()
-                estado.em_foco = bool(janela and janela.is_foreground)
-                if not estado.em_foco:
-                    # Sem foco o laco continua girando - so' para ouvir as
-                    # hotkeys - mas nao encosta no teclado.
-                    ultimo_aviso = self._talvez_avisar(estado, ultimo_aviso, agora)
-                    time.sleep(TIQUE_S)
-                    continue
-
-                precisa_ver = (
-                    (ligados.get("cast") and self._algum_slot_le_tela())
-                    or ligados.get("potion")
-                )
-                quadro = perfil = None
-                if precisa_ver:
-                    perfil = ResolvedProfile(DEFAULT_AUTOSKILL_PROFILE, janela.client)
-                    quadro = self._olhar(janela.client)
-
-                if ligados.get("potion") and quadro is not None:
-                    proxima["potion"] = self._talvez_beber(
-                        quadro, perfil, estado, agora, proxima["potion"]
-                    )
-
-                if ligados.get("cast") and agora >= proxima["cast"]:
-                    if self._talvez_castar(quadro, perfil, estado, agora):
-                        proxima["cast"] = agora + cfg.cast.intervalo_ms / 1000
-
-                for rep in cfg.repetidores:
-                    if ligados.get(rep.nome) and agora >= proxima[rep.nome]:
-                        if binds.disparar(rep.bind):
-                            estado.ultima_acao = rep.nome
-                            proxima[rep.nome] = (
-                                time.monotonic() + rep.intervalo_ms / 1000
-                            )
-
-                ultimo_aviso = self._talvez_avisar(estado, ultimo_aviso, agora)
-                time.sleep(TIQUE_S)
+                try:
+                    self._tique(gatilhos, proxima, estado, cfg)
+                except Exception:  # noqa: BLE001 - ver o comentario
+                    # Uma excecao aqui matava a THREAD, em silencio: o
+                    # AutoSkill parava de funcionar e nada na tela dizia isso,
+                    # so' reabrir o app resolvia. Anotar e seguir e' melhor -
+                    # o que costuma falhar (captura, janela que fechou) volta
+                    # sozinho no tique seguinte.
+                    log.exception("falha num tique do AutoSkill")
+                    self._emit(EventKind.ERROR, "autoskill.erro")
+                    time.sleep(0.25)
         finally:
             self._fechar_captura()
         return estado
+
+    def _tique(self, gatilhos, proxima, estado, cfg) -> None:
+        """Uma volta do laco. Fora do `while` para poder falhar sem derrubar."""
+        agora = time.monotonic()
+        self._sincronizar(gatilhos, proxima, agora)
+        ligados = {n: g.atualizar() for n, g in gatilhos.items()}
+        estado.ligados = dict(ligados)
+
+        janela = find_game_window()
+        estado.em_foco = bool(janela and janela.is_foreground)
+        if not estado.em_foco:
+            # Sem foco o laco continua girando - so' para ouvir as hotkeys -
+            # mas nao encosta no teclado.
+            self._avisar(estado, agora)
+            time.sleep(TIQUE_S)
+            return
+
+        precisa_ver = (
+            (ligados.get("cast") and self._algum_slot_le_tela())
+            or ligados.get("potion")
+        )
+        quadro = perfil = None
+        if precisa_ver:
+            perfil = ResolvedProfile(DEFAULT_AUTOSKILL_PROFILE, janela.client)
+            quadro = self._olhar(janela.client)
+
+        # A pocao vem PRIMEIRO, e a vida e' lida mesmo quando nao se vai beber:
+        # e' essa leitura que alimenta o indicador da aba.
+        agiu = False
+        if ligados.get("potion") and quadro is not None:
+            antes = proxima["potion"]
+            proxima["potion"] = self._talvez_beber(
+                quadro, perfil, estado, agora, antes
+            )
+            agiu = proxima["potion"] != antes
+
+        if not agiu and ligados.get("cast") and agora >= proxima["cast"]:
+            if self._talvez_castar(quadro, perfil, estado, agora):
+                proxima["cast"] = agora + cfg.cast.intervalo_ms / 1000
+                agiu = True
+
+        for rep in cfg.repetidores:
+            if agiu:
+                break
+            if ligados.get(rep.nome) and agora >= proxima[rep.nome]:
+                if binds.disparar(rep.bind):
+                    estado.ultima_acao = rep.nome
+                    proxima[rep.nome] = time.monotonic() + rep.intervalo_ms / 1000
+                    agiu = True
+
+        self._avisar(estado, agora)
+        time.sleep(TIQUE_S)
 
     def _olhar(self, client):
         """Um quadro da tela, abrindo a captura na primeira vez que precisar."""
@@ -298,11 +324,15 @@ class AutoSkillEngine:
             return time.monotonic() + cfg.cooldown_s
         return proxima
 
-    def _talvez_avisar(self, estado, ultimo, agora) -> float:
-        if agora - ultimo < AVISO_S:
-            return ultimo
+    def _avisar(self, estado, agora) -> None:
+        """Retrato para a interface, no maximo cinco vezes por segundo.
+
+        A cada tique seriam quarenta mensagens por segundo sem nada de novo.
+        """
+        if agora - self._ultimo_aviso < AVISO_S:
+            return
+        self._ultimo_aviso = agora
         self._emit(EventKind.STATE, "autoskill.estado", estado=estado)
-        return agora
 
 
 __all__ = ["AutoSkillEngine", "EstadoAutoSkill", "TIQUE_S"]

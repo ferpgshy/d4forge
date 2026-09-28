@@ -146,31 +146,119 @@ def test_le_a_vida_pela_borda_do_liquido(nome, esperado):
     assert abs(leitura.porcentagem() - esperado) <= 3, leitura.descreve()
 
 
-def test_com_escudo_a_leitura_e_conservadora(huds, perfil):
-    """A regressão que MATAVA o personagem.
+def test_le_a_vida_ATRAVES_da_barreira(huds, perfil):
+    """A regressão que matava o personagem, e a lição de como o orbe funciona.
 
-    O critério "o vazio é preto" é exato sem escudo, mas a barreira é azul —
-    ou seja, não é preta. Com o orbe coberto, ele lia 99% com a vida no fim, a
-    poção nunca saía, e o personagem morria de vida cheia no indicador.
+    A barreira não ESCONDE a vida — ela TINGE. Na documentação do jogo, "the
+    health remains visible underneath": é um overlay translúcido, e o degrau
+    entre cheio e vazio continua lá, só que os dois lados ficam mais claros.
 
-    A vida por baixo do escudo não está na tela para ninguém. Então a leitura
-    passa a ser a MENOR entre o preenchimento total e o nível do vermelho —
-    errar para baixo custa uma carga de poção, errar para cima custa a vida.
+    Tratá-la como tapume levou a duas versões erradas em sequência: a primeira
+    lia 99% com a vida no fim (e a poção nunca saía), a segunda lia 89% com a
+    vida CHEIA (e a poção saía à toa). O limiar normalizado por imagem
+    acompanha o tingimento e lê os dois casos certo.
+
+    Estes dois quadros têm barreira ativa E vida cheia.
     """
-    for tela in ("cd1", "cd2"):          # os dois quadros têm barreira ativa
+    for tela in ("cd1", "cd2"):
         leitura = ler_vida(huds[tela], perfil.health_orb)
         assert leitura.confiavel
         assert leitura.com_escudo, f"{tela}: deveria acusar escudo"
-        assert leitura.barreira > 0.1
-        # Conservadora: abaixo do que o critério otimista devolvia (99%).
-        assert leitura.porcentagem() < 95, f"{tela}: {leitura.descreve()}"
-        # E não pode desabar a ponto de beber poção à toa com a vida cheia.
-        assert leitura.porcentagem() > 70, f"{tela}: {leitura.descreve()}"
+        assert leitura.porcentagem() >= 95, f"{tela}: {leitura.descreve()}"
+
+
+ORBE_LADO, ORBE_RAIO, ORBE_CENTRO = 200, 90, (100, 100)
+ORBE_RECT = Rect(0, 0, ORBE_LADO, ORBE_LADO)
+
+
+def _orbe(vida, fortify=None, barreira=False):
+    """Um orbe desenhado com as três camadas que o jogo usa.
+
+    Modelado a partir da documentação, porque não tenho captura de todas as
+    combinações — e assim a vida verdadeira é um número que EU escolho, em vez
+    de algo que eu teria de adivinhar olhando um print:
+
+        vida      vermelho, enche de baixo para cima
+        fortify   "transparent red shield transposed over your Life" — pode
+                  passar ACIMA da linha da vida
+        barreira  overlay roxo translúcido sobre o disco inteiro
+    """
+    import cv2
+
+    img = np.zeros((ORBE_LADO, ORBE_LADO, 3), np.uint8)
+    cv2.circle(img, ORBE_CENTRO, ORBE_RAIO, (18, 18, 18), -1)
+    disco = cv2.circle(
+        np.zeros_like(img), ORBE_CENTRO, ORBE_RAIO, (1, 1, 1), -1
+    ) > 0
+
+    def enche(ate, cor, alpha=1.0):
+        if ate <= 0:
+            return
+        tampa = np.zeros_like(img)
+        cv2.circle(tampa, ORBE_CENTRO, ORBE_RAIO, cor, -1)
+        corte = ORBE_CENTRO[1] + ORBE_RAIO - int(2 * ORBE_RAIO * ate)
+        faixa = img[corte:]
+        img[corte:] = np.where(
+            disco[corte:],
+            cv2.addWeighted(faixa, 1 - alpha, tampa[corte:], alpha, 0),
+            faixa,
+        )
+
+    enche(vida, (40, 40, 200))
+    if fortify:
+        enche(fortify, (70, 70, 150), alpha=0.55)
+    if barreira:
+        escudo = np.zeros_like(img)
+        cv2.circle(escudo, ORBE_CENTRO, ORBE_RAIO, (170, 40, 120), -1)
+        img = np.where(disco, cv2.addWeighted(img, 0.6, escudo, 0.4, 0), img)
+    return img
+
+
+@pytest.mark.parametrize("vida", [0.2, 0.4, 0.6, 0.8])
+def test_a_barreira_nao_esconde_a_vida_baixa(vida):
+    """O caso em que o personagem MORRIA.
+
+    A barreira cobre o orbe inteiro de roxo, e a versão anterior lia isso como
+    vida cheia — a poção nunca saía. Ela não esconde a vida: tinge. O degrau
+    entre cheio e vazio continua lá, e o limiar normalizado por imagem o
+    acompanha.
+    """
+    limpo = ler_vida(_orbe(vida), ORBE_RECT).porcentagem()
+    tingido = ler_vida(_orbe(vida, barreira=True), ORBE_RECT).porcentagem()
+
+    assert abs(limpo - vida * 100) <= 8, f"sem escudo leu {limpo}%"
+    assert abs(tingido - limpo) <= 8, f"escudo mudou {limpo}% para {tingido}%"
+
+
+@pytest.mark.parametrize("vida, fortify", [(0.4, 0.7), (0.3, 0.9), (0.5, 0.5)])
+def test_fortify_nao_conta_como_vida(vida, fortify):
+    """Fortify é desenhado POR CIMA da vida e pode passar acima dela — se
+    fosse contado, o ciclo acharia que há mais vida do que há.
+
+    Não é contado porque o limiar procura o degrau DOMINANTE, e a passagem
+    vida→vazio é um salto de brilho maior que o da camada translúcida.
+    """
+    lido = ler_vida(_orbe(vida, fortify=fortify), ORBE_RECT).porcentagem()
+    assert abs(lido - vida * 100) <= 8, (
+        f"vida {vida * 100:.0f}% com fortify em {fortify * 100:.0f}% leu {lido}%"
+    )
+
+
+def test_as_tres_camadas_juntas():
+    """Vida baixa, fortify alto e barreira por cima — o pior caso."""
+    lido = ler_vida(_orbe(0.30, fortify=0.80, barreira=True), ORBE_RECT)
+    assert abs(lido.porcentagem() - 30) <= 8, lido.descreve()
+
+
+def test_o_desvio_e_para_baixo_e_isso_e_de_proposito():
+    """Errar para baixo custa uma carga de poção; errar para cima custa a
+    vida. A leitura pode subestimar um pouco, nunca superestimar muito."""
+    for vida in (0.2, 0.35, 0.5, 0.7):
+        lido = ler_vida(_orbe(vida, barreira=True), ORBE_RECT).porcentagem()
+        assert lido <= vida * 100 + 5, f"superestimou: {lido}% para {vida*100:.0f}%"
 
 
 def test_sem_escudo_a_leitura_nao_muda(huds, perfil):
-    """A ressalva acima só vale quando há escudo: sem ele, o critério exato
-    continua valendo inteiro."""
     leitura = ler_vida(huds["pronto"], perfil.health_orb)
     assert not leitura.com_escudo
     assert leitura.porcentagem() >= 95, leitura.descreve()

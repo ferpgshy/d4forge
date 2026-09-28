@@ -65,10 +65,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "as.potion_box": "Poção",
         "as.potion_below": "Beber abaixo de",
         "as.potion_cd": "Cooldown da poção",
-        "as.potion_shield": "beber mesmo sem enxergar a vida (escudo)",
+        "as.potion_shield": "beber mesmo se a leitura do orbe falhar",
         "as.potion_shield_tip": (
-            "Com barreira cobrindo o orbe, a vida não está visível na tela. "
-            "Por padrão o ciclo segura a poção em vez de chutar."
+            "A barreira azul não impede mais a leitura — ela tinge o orbe, e o "
+            "ciclo enxerga a vida por baixo. Isto aqui é só para o caso raro "
+            "de o orbe não ser legível: por padrão a poção é segurada em vez "
+            "de chutada."
         ),
         "as.repeaters_box": "Repetidores",
         "as.repeaters_hint": (
@@ -457,10 +459,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "as.potion_box": "Potion",
         "as.potion_below": "Drink below",
         "as.potion_cd": "Potion cooldown",
-        "as.potion_shield": "drink even when health is hidden (barrier)",
+        "as.potion_shield": "drink even if the orb cannot be read",
         "as.potion_shield_tip": (
-            "With a barrier covering the orb, health is not visible on screen. "
-            "By default the loop holds the potion instead of guessing."
+            "The blue barrier no longer blocks the reading — it tints the orb, "
+            "and the loop sees the health underneath. This is only for the "
+            "rare case where the orb is unreadable: by default the potion is "
+            "held rather than guessed."
         ),
         "as.repeaters_box": "Repeaters",
         "as.repeaters_hint": (

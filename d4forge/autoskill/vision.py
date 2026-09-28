@@ -25,7 +25,7 @@ Por isso a comparacao e' com o proprio slot: guarda-se o maior V p90 ja' visto
 ali e cooldown passa a ser "caiu para menos da metade do seu proprio brilho
 normal". Converge no primeiro segundo de jogo e nao pede calibracao nenhuma.
 
-**Vida: a linha de preenchimento, nao a proporcao de vermelho.**
+**Vida: a superficie do liquido, com limiar normalizado por imagem.**
 
 O orbe enche de baixo para cima e a borda entre o vermelho e o vazio e' nitida.
 Procurar essa BORDA e' mais robusto do que contar vermelho, e a diferenca nao e'
@@ -125,6 +125,11 @@ class LeitorDeCooldown:
         return estados
 
 
+# Acima desta fracao de azul no disco ha' barreira por cima da vida. Serve
+# so' para a interface AVISAR - a leitura em si ja' atravessa o tingimento.
+BARREIRA_QUE_ESCONDE = 0.10
+
+
 @dataclass(frozen=True)
 class LeituraDeVida:
     fracao: float          # 0..1; so' vale se `confiavel`
@@ -146,50 +151,59 @@ class LeituraDeVida:
         return f"{self.porcentagem()}%"
 
 
-# Vida VAZIA e' preta. O criterio e' esse, e nao "cheia e' vermelha".
+# COMO O ORBE FUNCIONA, que foi o que custou acertar.
 #
-# Parece a mesma coisa invertida, mas nao e': o que enche o orbe muda de cor
-# (vermelho normal, rosa dessaturado sob escudo, azul quando a barreira cobre
-# tudo), enquanto o VAZIO e' sempre o mesmo preto. Medido, com vida cheia e
-# escudo ativo: o criterio por vermelho lia 89%, o criterio por escuro le' 99%.
+# Sao tres camadas, e elas NAO se comportam igual:
 #
-# Em compensacao, barreira que cobre o orbe inteiro le' como vida cheia. Isso
-# nao e' um defeito deste metodo - e' o que a tela mostra: com o escudo por
-# cima, a vida embaixo nao esta' visivel para ninguem. A fracao de azul vai
-# junto na leitura para a interface poder avisar.
-V_DE_VAZIO = 60
-LINHA_VAZIA = 0.6
+#   vida      vermelho, enche de baixo para cima
+#   barreira  roxo/azul, overlay TRANSLUCIDO - "the health remains visible
+#             underneath"; absorve todo o dano antes da vida, entao enquanto
+#             ela segura a vida nem cai
+#   fortify   camada extra de vermelho mais claro, e um anel na borda
+#
+# O erro que matou o personagem foi tratar a barreira como se ela ESCONDESSE a
+# vida. Ela nao esconde: ela TINGE. O degrau entre cheio e vazio continua la',
+# so' que os dois lados ficam mais claros.
+#
+# Por isso o limiar nao pode ser um numero fixo de brilho. Ele e' calculado
+# POR IMAGEM, no meio do contraste que aquele quadro tem - assim acompanha o
+# tingimento em vez de lutar contra ele. Medido nas amostras:
+#
+#                            limiar fixo   normalizado   real
+#   cheia, sem escudo             97%          96%       100
+#   cheia, COM escudo             89%         100%       100
+#   vida parcial                  61%          62%       ~55-60
+#   vida parcial                  44%          45%       ~45
+#
+# A versao com limiar fixo lia 89% com a vida CHEIA e escudo: perto demais de
+# limiares comuns, e o ciclo bebia pocao a toa.
 
-# Vermelho de sangue, nas duas pontas do circulo de matiz do OpenCV. Usado so'
-# como SEGUNDA opiniao, quando ha' escudo (ver `ler_vida`).
-def _mascara_vermelha(hsv: np.ndarray) -> np.ndarray:
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    return ((h <= 12) | (h >= 168)) & (s > 70) & (v > 40)
+# Suavizacao do perfil, em linhas. O reflexo especular do orbe e' um ponto
+# claro que, sem isto, vira um degrau falso.
+SUAVIZACAO = 5
+
+# Abaixo deste contraste nao ha' degrau: o orbe esta' todo cheio ou todo
+# vazio. Medido, um orbe COM degrau tem contraste de 49 a 92.
+CONTRASTE_MINIMO = 25
+
+# Desempate do caso sem degrau: acima disto o disco esta' aceso, logo cheio.
+BRILHO_DE_CHEIO = 55
 
 
-# A partir desta fracao de azul no disco, ha' escudo por cima da vida.
-# Medido: sem barreira o azul fica em 0,6%; com barreira passa de 27%.
-BARREIRA_QUE_ESCONDE = 0.10
-
-
-def _nivel(mascara, cx, cy, raio, limiar) -> float:
-    """Altura da primeira linha que NAO e' majoritariamente `mascara`.
-
-    E' a superficie do liquido: o que esta' abaixo dela conta como cheio.
-    """
-    topo, base = cy - raio, cy + raio
-    for y in range(topo, base + 1):
-        largura = int((raio * raio - (y - cy) ** 2) ** 0.5)
-        if largura < 6:
+def _perfil_de_brilho(recorte, cx, cy, raio) -> np.ndarray:
+    """Brilho medio de cada linha do disco, do topo para a base."""
+    v = cv2.cvtColor(recorte, cv2.COLOR_BGR2HSV)[..., 2].astype(np.float32)
+    linhas = []
+    for dy in range(-raio, raio + 1):
+        meia = int((raio * raio - dy * dy) ** 0.5)
+        if meia < 8:
             continue
-        linha = mascara[y, cx - largura:cx + largura + 1]
-        if linha.size and linha.mean() < limiar:
-            return max(0.0, min(1.0, (base - y) / (base - topo)))
-    return 0.0
+        linhas.append(float(v[cy + dy, cx - meia:cx + meia + 1].mean()))
+    return np.array(linhas, dtype=np.float32)
 
 
 def ler_vida(frame: np.ndarray, orbe) -> LeituraDeVida:
-    """Fracao de vida pela altura da borda do liquido dentro do orbe."""
+    """Fracao de vida pela altura da superficie do liquido no orbe."""
     recorte = orbe.crop(frame)
     if recorte.size == 0:
         return LeituraDeVida(0.0, False, 0.0)
@@ -197,38 +211,42 @@ def ler_vida(frame: np.ndarray, orbe) -> LeituraDeVida:
     alt, larg = recorte.shape[:2]
     cx, cy = larg // 2, alt // 2
     raio = int(min(cx, cy) * ORBE_UTIL)
-    if raio < 8:
+    if raio < 12:
         return LeituraDeVida(0.0, False, 0.0)
 
-    hsv = cv2.cvtColor(recorte, cv2.COLOR_BGR2HSV)
-    escuro = hsv[..., 2] < V_DE_VAZIO
-    azul = _mascara_azul(hsv)
+    perfil = _perfil_de_brilho(recorte, cx, cy, raio)
+    if len(perfil) < SUAVIZACAO * 2:
+        return LeituraDeVida(0.0, False, 0.0)
 
-    # So' o disco entra na conta: os cantos do recorte sao cenario, e cenario
-    # escuro seria lido como orbe vazio.
+    # Quanto do disco a barreira cobre. Nao entra mais na DECISAO - o limiar
+    # normalizado ja' da' conta dela -, mas a interface mostra.
+    hsv = cv2.cvtColor(recorte, cv2.COLOR_BGR2HSV)
     ys, xs = np.ogrid[:alt, :larg]
     disco = (xs - cx) ** 2 + (ys - cy) ** 2 <= raio * raio
     pixels = int(disco.sum())
-    if not pixels:
-        return LeituraDeVida(0.0, False, 0.0)
-    fracao_azul = float((azul & disco).sum()) / pixels
+    fracao_azul = (
+        float((_mascara_azul(hsv) & disco).sum()) / pixels if pixels else 0.0
+    )
 
-    # Sem escudo, "o vazio e' preto" e' exato: 97..99% com a vida cheia.
-    por_escuro = _nivel(escuro, cx, cy, raio, LINHA_VAZIA)
-    if fracao_azul < BARREIRA_QUE_ESCONDE:
-        return LeituraDeVida(por_escuro, True, fracao_azul)
+    suave = np.convolve(
+        perfil, np.ones(SUAVIZACAO) / SUAVIZACAO, mode="valid"
+    )
+    baixo, alto = np.percentile(suave, 10), np.percentile(suave, 90)
 
-    # Com escudo, a vida embaixo NAO esta' na tela. Antes isto devolvia o
-    # nivel do preenchimento total - e barreira cobrindo o orbe lia 99% com a
-    # vida no fim, entao a pocao nunca saia e o personagem morria.
-    #
-    # A segunda opiniao e' o nivel do VERMELHO, que o azul do escudo derruba:
-    # medido com vida cheia e barreira, ele le' 89% contra os 99% reais. Errar
-    # para BAIXO custa uma carga de pocao; errar para cima custa a vida.
-    vermelho = _mascara_vermelha(hsv)
-    # `~vermelho` porque `_nivel` procura onde a mascara DEIXA de dominar.
-    por_vermelho = _nivel(~vermelho, cx, cy, raio, LINHA_VAZIA)
-    return LeituraDeVida(min(por_escuro, por_vermelho), True, fracao_azul)
+    if alto - baixo < CONTRASTE_MINIMO:
+        # Sem degrau: o orbe esta' inteiro de um jeito so'.
+        cheio = float(suave.mean()) > BRILHO_DE_CHEIO
+        return LeituraDeVida(1.0 if cheio else 0.0, True, fracao_azul)
+
+    meio = (baixo + alto) / 2
+    acesas = np.where(suave > meio)[0]
+    if not len(acesas):
+        return LeituraDeVida(0.0, True, fracao_azul)
+    # A primeira linha acesa vindo do topo e' a superficie; o que esta' abaixo
+    # dela e' vida.
+    return LeituraDeVida(
+        max(0.0, min(1.0, 1.0 - acesas[0] / len(suave))), True, fracao_azul
+    )
 
 
 __all__ = [

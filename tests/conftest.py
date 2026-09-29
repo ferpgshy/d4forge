@@ -146,12 +146,18 @@ def config_isolada(tmp_path, monkeypatch):
     dados.mkdir()
     monkeypatch.setattr(config, "DATA_DIR", dados)
     monkeypatch.setattr(config, "CAPTURES_DIR", tmp_path / "captures")
-    monkeypatch.setattr(config, "SETTINGS_PATH", dados / "settings.json")
-    monkeypatch.setattr(config, "CATALOG_PATH", dados / "affixes.json")
-    monkeypatch.setattr(config, "RULES_PATH", dados / "rules.json")
-    monkeypatch.setattr(config, "TIMINGS_PATH", dados / "timings.json")
-    monkeypatch.setattr(config, "TEMPER_PATH", dados / "temper.json")
-    monkeypatch.setattr(config, "MW_PATH", dados / "masterwork.json")
+
+    # TODO `*_PATH` do config, e nao uma lista escrita a mao.
+    #
+    # A lista a mao ja' falhou: o AUTOSKILL_PATH nasceu depois desta fixture e
+    # ficou de fora, entao a suite inteira passou a gravar no
+    # `data/autoskill.json` DE VERDADE - exatamente o estrago que esta fixture
+    # existe para impedir. Derivar do proprio modulo fecha a classe do
+    # problema: caminho novo ja' nasce isolado.
+    for nome in sorted(n for n in dir(config) if n.endswith("_PATH")):
+        monkeypatch.setattr(
+            config, nome, dados / Path(getattr(config, nome)).name
+        )
     return dados
 
 

@@ -335,7 +335,7 @@ def test_troca_de_idioma_preserva_a_sessao(janela):
     ]
     # A página do Enchant é a única refeita, e tem de continuar dentro da área
     # de rolagem — fora dela a aba volta a não encolher.
-    assert janela._area_enchant.widget() is not None
+    assert janela._areas["enchant"].widget() is not None
     assert janela.status.text() == t("panel.idle")
 
 

@@ -17,8 +17,23 @@ Confira uma demonstração rápida do fluxo em [Demo.mp4](Demo.mp4).
 
 ## Instalação
 
-Baixe o `.zip` da [última release](../../releases/latest), extraia e execute
-`d4forge.exe`. Não precisa de Python.
+Baixe o **`d4forge-launcher.exe`** da [última release](../../releases/latest)
+e execute. São 10 MB: ele mostra as três edições, baixa a que você escolher e
+avisa quando sai versão nova. Não precisa de Python.
+
+| edição | o que tem | download |
+|---|---|---|
+| **Completo** | Enchant, Tempering, Masterworking, AutoSkill e Catálogo | 134 MB |
+| **Forge** | só as bancadas de crafting | mesmo pacote do Completo |
+| **AutoSkill** | só o AutoSkill, sem leitor de texto | 96 MB |
+
+Forge e Completo saem do **mesmo download**: os dois pacotes diferem num
+marcador de dez bytes, então trocar entre eles é instantâneo e não baixa nada
+de novo.
+
+O launcher instala numa pasta ao lado dele — copie a pasta inteira se quiser
+levar para outra máquina. A sua `data/` (binds, alvo, catálogo editado) é
+preservada nas atualizações.
 
 <details>
 <summary>Rodando a partir do código</summary>
@@ -38,6 +53,16 @@ Para gerar o executável e o atalho:
 .venv\Scripts\python.exe tools\build_exe.py
 .venv\Scripts\python.exe tools\criar_atalho.py
 ```
+
+Para montar um release inteiro — as duas edições, o launcher e o
+`manifesto.json` que ele lê:
+
+```powershell
+.venv\Scripts\python.exe tools\empacotar_release.py
+```
+
+Para conferir o launcher contra um release **antes** de publicá-lo, sirva a
+pasta `dist/release` por HTTP e aponte a variável `D4FORGE_ORIGEM` para ela.
 
 </details>
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config
+from .. import config, edicao
 from ..affixes import AffixCatalog, AffixEntry, Slot, Unit, looks_like_affix_name
 from ..automation.safety import VK_F12, Guard, Limits, key_pressed_once
 from ..automation.sendinput import DEFAULT_PROFILE as DEFAULT_INPUT
@@ -104,14 +105,21 @@ class AppState:
         settings = config.Settings.load()
         set_language(settings.language)
 
-        catalog = AffixCatalog.load(config.CATALOG_PATH)
-        # O catálogo já vem completo: importar era um passo que todo mundo
-        # precisava dar e ninguém adivinhava. É idempotente e nunca sobrescreve
-        # o que você editou.
-        imported = import_full_catalog(catalog)
-        purged = purge_ocr_garbage(catalog)
-        if imported or purged:
-            catalog.save(config.CATALOG_PATH)
+        # A edicao so'-AutoSkill nao le' texto da tela: nenhuma aba dela usa
+        # o catalogo. Importar os ~880 afixos custa quase um segundo de
+        # partida, e seria um segundo gasto para nada.
+        catalog = AffixCatalog()
+        imported = 0
+        purged: list[str] = []
+        if edicao.precisa_de_ocr():
+            catalog = AffixCatalog.load(config.CATALOG_PATH)
+            # O catálogo já vem completo: importar era um passo que todo mundo
+            # precisava dar e ninguém adivinhava. É idempotente e nunca
+            # sobrescreve o que você editou.
+            imported = import_full_catalog(catalog)
+            purged = purge_ocr_garbage(catalog)
+            if imported or purged:
+                catalog.save(config.CATALOG_PATH)
 
         return cls(
             settings=settings,
@@ -125,9 +133,17 @@ class AppState:
 
     def save(self) -> None:
         self.settings.save()
-        self.catalog.save(config.CATALOG_PATH)
+        # O catalogo e o cache do leitor so' sao gravados por quem os USA.
+        #
+        # Sem esta guarda, a edicao so'-AutoSkill - que carrega um catalogo
+        # VAZIO, porque nao le' texto - sobrescreveria com nada o affixes.json
+        # de quem tambem roda a edicao completa na mesma pasta. Perder o
+        # catalogo editado a mao por abrir o executavel errado seria um
+        # estrago silencioso e dificil de relacionar com a causa.
+        if edicao.precisa_de_ocr():
+            self.catalog.save(config.CATALOG_PATH)
+            self.ocr.save()
         self.ruleset.save(config.RULES_PATH)
-        self.ocr.save()
         self.profiler.save(config.TIMINGS_PATH)
 
 
@@ -211,7 +227,9 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._unknown: dict[str, int] = {}
         self._catalog_carregado = False
 
-        self.setWindowTitle(t("app.window"))
+        # O titulo carrega a edicao: com tres executaveis parecidos abertos,
+        # e' o que diz qual e' qual na barra de tarefas.
+        self.setWindowTitle(edicao.nome())
         # 880 de largura mínima era o preço de um layout que não encolhia: um
         # mínimo MENOR do que o layout precisa não impede o encolhimento, só
         # deixa os widgets se sobreporem. Agora cada aba mora numa área de
@@ -249,15 +267,24 @@ class MainWindow(FramelessMixin, QMainWindow):
         # janela não podia ser menor do que a mais alta delas. O Catálogo não —
         # ele é uma tabela que já rola por dentro, e duas barras de rolagem
         # encaixadas é pior do que o problema que resolveriam.
-        self._area_enchant = pagina_rolavel(self._build_panel())
-        self._area_temper = pagina_rolavel(self._build_temper())
-        self._area_mw = pagina_rolavel(self._build_mw())
-        self._area_autoskill = pagina_rolavel(self._build_autoskill())
-        self.tabs.addTab(self._area_enchant, t("tab.enchant"))
-        self.tabs.addTab(self._area_temper, t("tab.temper"))
-        self.tabs.addTab(self._area_mw, t("tab.mw"))
-        self.tabs.addTab(self._area_autoskill, t("tab.autoskill"))
-        self.tabs.addTab(self._build_catalog(), t("tab.catalog"))
+        # So' as abas desta edicao (ver `edicao.py`). O executavel so'-Forge e
+        # o so'-AutoSkill sao o MESMO codigo com recortes diferentes; nenhuma
+        # aba precisou saber que as outras existem.
+        self._paginas = {
+            "enchant": lambda: pagina_rolavel(self._build_panel()),
+            "temper": lambda: pagina_rolavel(self._build_temper()),
+            "mw": lambda: pagina_rolavel(self._build_mw()),
+            "autoskill": lambda: pagina_rolavel(self._build_autoskill()),
+            # O Catálogo nao rola por fora: e' uma tabela que ja' rola por
+            # dentro, e duas barras encaixadas sao piores que o problema.
+            "catalog": self._build_catalog,
+        }
+        self._abas = edicao.abas()
+        self._areas: dict[str, QWidget] = {}
+        for chave in self._abas:
+            pagina = self._paginas[chave]()
+            self._areas[chave] = pagina
+            self.tabs.addTab(pagina, t(f"tab.{chave}"))
         # A tabela do catálogo tem ~880 linhas: montá-la só quando alguém abre a
         # aba tira quase um segundo da abertura e da troca de idioma.
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -265,11 +292,11 @@ class MainWindow(FramelessMixin, QMainWindow):
         layout.addWidget(corpo, 1)
         self.setCentralWidget(raiz)
 
-        self._reload_target()
-
-        if self.app.purged:
-            self._note("msg.purged", names=", ".join(self.app.purged))
-        self._note("msg.catalog_loaded", count=len(self.app.catalog))
+        if edicao.tem("enchant"):
+            self._reload_target()
+            if self.app.purged:
+                self._note("msg.purged", names=", ".join(self.app.purged))
+            self._note("msg.catalog_loaded", count=len(self.app.catalog))
 
         # Atalho global: funciona com o Diablo IV em foco, que é quando a
         # janela do app está inacessível.
@@ -282,11 +309,16 @@ class MainWindow(FramelessMixin, QMainWindow):
 
         # Carrega o leitor agora, para o custo de partida não cair sobre a
         # primeira leitura do ciclo.
-        self._iniciar_autoskill()
+        if edicao.tem("autoskill"):
+            self._iniciar_autoskill()
 
+        # Aquecer o leitor so' vale a pena se alguma aba for ler texto.
         self._warmup = WarmupWorker(self.app)
-        self._warmup.ready.connect(lambda ms: self._note("msg.ocr_ready", ms=ms))
-        self._warmup.start()
+        if edicao.precisa_de_ocr():
+            self._warmup.ready.connect(
+                lambda ms: self._note("msg.ocr_ready", ms=ms)
+            )
+            self._warmup.start()
 
         # Por último, com o layout já montado: antes disto o Qt ainda não sabe
         # o mínimo da janela e `encaixar_na_tela` teria de adivinhá-lo.
@@ -468,29 +500,32 @@ class MainWindow(FramelessMixin, QMainWindow):
             # QTabWidget a cada troca de idioma, e devolvia o foco e a posição
             # de rolagem ao início. Só o conteúdo do Enchant é refeito — ele é
             # o único montado a partir dos textos.
-            trocar_conteudo(self._area_enchant, self._build_panel())
-            self._retranslate_catalog()
-            for i, chave in enumerate(
-                ("tab.enchant", "tab.temper", "tab.mw", "tab.autoskill",
-                 "tab.catalog")
-            ):
-                self.tabs.setTabText(i, t(chave))
+            if "enchant" in self._areas:
+                trocar_conteudo(self._areas["enchant"], self._build_panel())
+            if "catalog" in self._areas:
+                self._retranslate_catalog()
+            for i, chave in enumerate(self._abas):
+                self.tabs.setTabText(i, t(f"tab.{chave}"))
             self.tabs.setCurrentIndex(indice)
 
-            self._reload_target()
-            self.progress.retranslate()
             # As abas do Ferreiro são REAPROVEITADAS (uma aba nova perderia a
             # sessão), então elas não trocam de idioma sozinhas ao serem
             # readicionadas: os rótulos internos continuam os de antes. Sem
             # estas chamadas, metade do app ficava na língua anterior — era
             # assim desde que a aba do Tempering existe.
-            self.temper_tab.retranslate()
-            self.btn_temper.setText(f"{t('temper.start')}   ·   F10")
-            self.btn_temper_stop.setText(f"{t('panel.stop')}   ·   F12")
-            self.autoskill_tab.retranslate()
-            self.mw_tab.retranslate()
-            self.btn_mw.setText(f"{t('mw.start')}   ·   F11")
-            self.btn_mw_stop.setText(f"{t('panel.stop')}   ·   F12")
+            if edicao.tem("enchant"):
+                self._reload_target()
+                self.progress.retranslate()
+            if edicao.tem("temper"):
+                self.temper_tab.retranslate()
+                self.btn_temper.setText(f"{t('temper.start')}   ·   F10")
+                self.btn_temper_stop.setText(f"{t('panel.stop')}   ·   F12")
+            if edicao.tem("mw"):
+                self.mw_tab.retranslate()
+                self.btn_mw.setText(f"{t('mw.start')}   ·   F11")
+                self.btn_mw_stop.setText(f"{t('panel.stop')}   ·   F12")
+            if edicao.tem("autoskill"):
+                self.autoskill_tab.retranslate()
             self.lbl_subtitle.setText(t("app.subtitle"))
             self._refresh_lang_button()
             for nome, chave in (
@@ -1014,16 +1049,22 @@ class MainWindow(FramelessMixin, QMainWindow):
 
     # ------------------------------------------------------ atalho global
     def _poll_hotkeys(self) -> None:
+        """F9/F10/F11 ligam cada bancada; F12 freia todas.
+
+        Cada tecla so' e' LIDA se a edicao tiver a aba dela: numa edicao
+        so'-AutoSkill, F9 pertence ao usuario e o app nao pode roubar.
+        """
         rodando = bool(self.engine_worker and self.engine_worker.isRunning())
         temperando = bool(self.temper_worker and self.temper_worker.isRunning())
         masterizando = bool(self.mw_worker and self.mw_worker.isRunning())
-        if key_pressed_once(VK_F9):
+
+        if edicao.tem("enchant") and key_pressed_once(VK_F9):
             self._stop() if rodando else self._start()
-        elif key_pressed_once(VK_F10):
+        elif edicao.tem("temper") and key_pressed_once(VK_F10):
             self._stop_temper() if temperando else self._start_temper()
-        elif key_pressed_once(VK_F11):
+        elif edicao.tem("mw") and key_pressed_once(VK_F11):
             self._stop_mw() if masterizando else self._start_mw()
-        elif key_pressed_once(VK_F12):
+        elif (rodando or temperando or masterizando) and key_pressed_once(VK_F12):
             # F12 é o freio de todos: quem aperta em pânico não escolhe qual.
             if rodando:
                 self._stop()
@@ -1034,7 +1075,16 @@ class MainWindow(FramelessMixin, QMainWindow):
 
     # ---------------------------------------------------------- ciclo/vida
     def _collect_settings(self) -> None:
+        """Leva para os ajustes o que os campos mostram, e grava.
+
+        Os campos vivem no painel do Enchant. Numa edicao sem ele nao ha' o
+        que coletar - mas `save()` continua valendo, porque idioma e geometria
+        da janela moram no mesmo arquivo.
+        """
         s = self.app.settings
+        if not edicao.tem("enchant"):
+            s.save()
+            return
         s.max_attempts = self.spin_attempts.value()
         s.max_minutes = self.spin_minutes.value() or None
         s.start_delay_s = self.spin_delay.value()
@@ -1296,17 +1346,20 @@ class MainWindow(FramelessMixin, QMainWindow):
         Estar tudo num lugar so' e' o ponto: a aba seguinte que alguem criar
         entra aqui, em vez de nascer com o mesmo buraco.
         """
-        # `silencioso`: quem escreve o rules.json e' o `app.save()` logo
-        # adiante, e gravar duas vezes so' dobraria a escrita.
-        self._save_target(silencioso=True)
-        if hasattr(self, "temper_tab"):
+        # Cada aba so' e' salva se esta edicao a tiver - ver `edicao.py`.
+        if edicao.tem("enchant"):
+            # `silencioso`: quem escreve o rules.json e' o `app.save()` logo
+            # adiante, e gravar duas vezes so' dobraria a escrita.
+            self._save_target(silencioso=True)
+        if edicao.tem("temper"):
             config.save_temper_goal(self.temper_tab.goal())
-        if hasattr(self, "mw_tab"):
+        if edicao.tem("mw"):
             config.save_mw_goal(self.mw_tab.goal())
-        if hasattr(self, "autoskill_tab"):
+        if edicao.tem("autoskill"):
             self._save_autoskill()
-        # Nao faz nada se a tabela nunca foi montada - ver `_save_catalog`.
-        self._save_catalog()
+        if edicao.tem("catalog"):
+            # Nao faz nada se a tabela nunca foi montada - ver `_save_catalog`.
+            self._save_catalog()
 
     def _iniciar_autoskill(self) -> None:
         """Poe o laco no ar junto com a janela.
@@ -1447,16 +1500,55 @@ def _as_float(item, default):
         return default
 
 
-def main() -> int:
-    app = QApplication(sys.argv)
+def esvaziar_saidas() -> None:
+    """Esvazia log, stdout e stderr — e sobrevive a não haver nenhum deles.
+
+    No executável sem console `sys.stdout` e `sys.stderr` são `None`: não
+    existe para onde esvaziar. Chamar `.flush()` ali levantava
+    `AttributeError` no caminho de saída e o app fechava com a caixa de
+    "unhandled exception" do PyInstaller, bem depois de já ter gravado tudo.
+    """
+    logging.shutdown()
+    for fluxo in (sys.stdout, sys.stderr):
+        if fluxo is None:
+            continue
+        try:
+            fluxo.flush()
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def nomear_aplicativo(app: QApplication) -> None:
+    """Dá nome ao processo — e o nome depende da edição.
+
+    O plugin do Windows cola `" - <nome de exibição>"` no título de toda janela
+    cujo título ainda não termine nesse nome. Com `"d4forge"` fixo aqui, a
+    edição Forge abria como `"d4forge Forge - d4forge"`. Usar a própria edição
+    faz o título terminar no nome de exibição, e nada é colado.
+    """
     # Nome e organização entram no que o Windows mostra na barra de tarefas e
     # nas caixas de diálogo do sistema; sem eles aparecia "python".
     app.setApplicationName("d4forge")
-    app.setApplicationDisplayName("d4forge")
+    app.setApplicationDisplayName(edicao.nome())
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    nomear_aplicativo(app)
     app.setStyleSheet(style.QSS)
     janela = MainWindow(AppState.load())
     janela.show()
-    return app.exec()
+    codigo = app.exec()
+
+    # Saída determinística, e o motivo é concreto: `closeEvent` já parou as
+    # threads e gravou a configuração, então o que resta é o Windows
+    # descarregando DLLs. Na edição completa — onnxruntime e dxcam vivos no
+    # mesmo processo — essa ordem terminava em fail-fast 0xC0000409 quando a
+    # janela era fechada durante o aquecimento do OCR: medido, 2 de 3 fechos
+    # imediatos caíam. Nenhum código nosso roda depois daqui além do flush,
+    # e o processo está morrendo de qualquer forma.
+    esvaziar_saidas()
+    os._exit(codigo)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,17 @@
-"""Gera o executável do d4forge.
+"""Gera os executáveis do d4forge.
 
-    .venv\\Scripts\\python.exe tools\\build_exe.py
+    .venv\\Scripts\\python.exe tools\\build_exe.py              as tres
+    .venv\\Scripts\\python.exe tools\\build_exe.py autoskill    so' uma
+
+Sao TRES edicoes, para quem baixa pegar so' o que vai usar:
+
+    completa    d4forge              tudo
+    forge       d4forge-forge        Enchant, Tempering, Masterworking
+    autoskill   d4forge-autoskill    so' o AutoSkill
+
+A diferenca nao e' so' quais abas aparecem. O AutoSkill nao le' texto da tela
+- ele mede brilho -, entao a edicao dele deixa o rapidocr e o onnxruntime de
+fora, o que tira ~60 MB do pacote. Ver `d4forge/edicao.py`.
 
 Instala o que faltar (PyInstaller e as dependências do projeto) e empacota tudo
 em dist/d4forge/. Não precisa de Python na máquina que for rodar o resultado.
@@ -27,6 +38,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PY = Path(sys.executable)
 NOME = "d4forge"
+
+sys.path.insert(0, str(ROOT))
+from d4forge import edicao  # noqa: E402
+
+# Nome do executavel de cada edicao, e o que cada uma deixa de fora.
+#
+# So' a `autoskill` exclui: as outras duas leem texto e precisam do leitor
+# inteiro. Excluir por engano nao daria erro de compilacao - o import do
+# rapidocr e' TARDIO, dentro da funcao -, daria erro so' quando o usuario
+# apertasse Iniciar. Por isso `conferir` cobra os modelos das edicoes que os
+# usam.
+EDICOES = {
+    edicao.COMPLETA: ("d4forge", ()),
+    edicao.FORGE: ("d4forge-forge", ()),
+    edicao.AUTOSKILL: (
+        "d4forge-autoskill",
+        ("rapidocr_onnxruntime", "onnxruntime", "shapely", "pyclipper", "PIL"),
+    ),
+}
+
+MARCADOR = ROOT / "d4forge" / "resources" / edicao.ARQUIVO
 
 
 def executar(*args: str, descricao: str = "") -> None:
@@ -67,7 +99,7 @@ def garantir_icone() -> Path:
     return icone
 
 
-def guardar_dados(raiz: Path | None = None) -> Path | None:
+def guardar_dados(raiz: Path | None = None, nome: str = NOME) -> Path | None:
     """Tira o `data/` do usuario de dentro de `dist/` antes da limpeza.
 
     `config._dirs()` poe a pasta gravavel AO LADO do executavel quando o app
@@ -78,22 +110,23 @@ def guardar_dados(raiz: Path | None = None) -> Path | None:
     hipotese: aconteceu, e mais de uma vez na mesma sessao - quem estava
     testando perdeu as binds a cada build.
     """
-    origem = (raiz or ROOT) / "dist" / NOME / "data"
+    origem = (raiz or ROOT) / "dist" / nome / "data"
     if not origem.is_dir():
         return None
-    abrigo = Path(tempfile.mkdtemp(prefix=f"{NOME}-data-"))
+    abrigo = Path(tempfile.mkdtemp(prefix=f"{nome}-data-"))
     destino = abrigo / "data"
     shutil.move(str(origem), str(destino))
     print(f">> guardei {origem} durante o build")
     return destino
 
 
-def devolver_dados(guardado: Path | None, raiz: Path | None = None) -> None:
+def devolver_dados(guardado: Path | None, raiz: Path | None = None,
+                   nome: str = NOME) -> None:
     """Repoe o `data/` do usuario depois do build. Idempotente."""
     if guardado is None or not Path(guardado).is_dir():
         return
     guardado = Path(guardado)
-    destino = (raiz or ROOT) / "dist" / NOME / "data"
+    destino = (raiz or ROOT) / "dist" / nome / "data"
     destino.parent.mkdir(parents=True, exist_ok=True)
     # O build novo pode ter criado um data/ proprio; o do usuario e' que vale.
     if destino.exists():
@@ -103,30 +136,45 @@ def devolver_dados(guardado: Path | None, raiz: Path | None = None) -> None:
     print(f">> devolvi {destino}")
 
 
-def limpar() -> None:
-    for pasta in ("build", "dist"):
-        alvo = ROOT / pasta
+def limpar(nome: str) -> None:
+    """Apaga o que sobrou do build ANTERIOR desta edicao.
+
+    Por edicao, e nao `dist/` inteiro: com tres executaveis, limpar tudo faria
+    o segundo build apagar o primeiro.
+    """
+    for alvo in (ROOT / "build" / nome, ROOT / "dist" / nome):
         if alvo.exists():
             shutil.rmtree(alvo, ignore_errors=True)
-    spec = ROOT / f"{NOME}.spec"
-    spec.unlink(missing_ok=True)
+    (ROOT / f"{nome}.spec").unlink(missing_ok=True)
 
     # `ignore_errors` acima faz a limpeza passar em silencio quando um arquivo
     # esta' travado - e ai o PyInstaller quebra la' na frente com um traceback
     # de PermissionError em cv2.pyd, que nao diz o que fazer. A causa e' quase
     # sempre uma copia do proprio app ainda aberta.
-    restante = ROOT / "dist" / NOME
+    restante = ROOT / "dist" / nome
     if restante.exists():
         raise SystemExit(
             f"nao consegui limpar {restante}.\n"
-            f"Feche o {NOME}.exe se ele estiver aberto e rode de novo."
+            f"Feche o {nome}.exe se ele estiver aberto e rode de novo."
         )
 
 
-def empacotar(icone: Path) -> None:
+def empacotar(qual: str, icone: Path) -> None:
+    nome, excluir = EDICOES[qual]
+    # O marcador viaja dentro do pacote, junto dos outros recursos: e' por ele
+    # que o executavel sabe qual edicao e' (ver `edicao._do_arquivo`).
+    MARCADOR.write_text(qual + "\n", encoding="utf-8")
+
+    coleta: list[str] = []
+    if qual != edicao.AUTOSKILL:
+        coleta = [
+            "--collect-all", "rapidocr_onnxruntime",  # modelos .onnx + config
+            "--collect-all", "onnxruntime",           # DLLs do runtime
+        ]
+
     args = [
         str(PY), "-m", "PyInstaller",
-        "--name", NOME,
+        "--name", nome,
         "--noconfirm",
         "--clean",
         "--windowed",              # sem janela de console atrás da GUI
@@ -136,9 +184,7 @@ def empacotar(icone: Path) -> None:
         # executavel ja' e' falso positivo de 4 motores heuristicos sem isso.
         # Explicito para que a maquina de quem compilar nao mude o resultado.
         "--noupx",
-        # Recursos que o PyInstaller nao descobre sozinho:
-        "--collect-all", "rapidocr_onnxruntime",   # modelos .onnx + config.yaml
-        "--collect-all", "onnxruntime",            # DLLs do runtime
+        *coleta,
         "--add-data", f"{ROOT / 'd4forge' / 'resources'}{os_sep()}d4forge/resources",
         # Modulos carregados por nome, invisiveis para a analise estatica:
         "--hidden-import", "dxcam",
@@ -151,9 +197,11 @@ def empacotar(icone: Path) -> None:
         "--exclude-module", "PySide6.QtWebEngineCore",
         "--exclude-module", "PySide6.Qt3DCore",
         "--exclude-module", "PySide6.QtMultimedia",
-        str(ROOT / "run.py"),
     ]
-    executar(*args, descricao="empacotando (pode levar alguns minutos)")
+    for modulo in excluir:
+        args += ["--exclude-module", modulo]
+    args.append(str(ROOT / "run.py"))
+    executar(*args, descricao=f"empacotando {nome} (pode levar alguns minutos)")
 
 
 def os_sep() -> str:
@@ -161,55 +209,85 @@ def os_sep() -> str:
     return ";" if sys.platform == "win32" else ":"
 
 
-def conferir(destino: Path) -> None:
+def conferir(qual: str) -> float:
     """O .exe só quebra ao apertar Iniciar se faltar modelo. Conferir agora."""
-    exe = destino / f"{NOME}.exe"
+    nome, _ = EDICOES[qual]
+    destino = ROOT / "dist" / nome
+    exe = destino / f"{nome}.exe"
     if not exe.exists():
         raise SystemExit(f"executável não foi gerado em {destino}")
 
+    marcador = list(destino.rglob(edicao.ARQUIVO))
     onnx = list(destino.rglob("*.onnx"))
     yaml = list(destino.rglob("config.yaml"))
     afixos = list(destino.rglob("d4lf_affixes_enUS.json"))
-
-    print("\n>> conferindo o pacote")
-    print(f"   {NOME}.exe                {exe.stat().st_size / 1024 / 1024:6.1f} MB")
-    print(f"   modelos .onnx            {len(onnx)}")
-    print(f"   config.yaml do RapidOCR  {len(yaml)}")
-    print(f"   lista de afixos          {len(afixos)}")
-
-    problemas = []
-    if len(onnx) < 3:
-        problemas.append("faltam modelos .onnx (detecção/reconhecimento/classificação)")
-    if not yaml:
-        problemas.append("falta o config.yaml do RapidOCR")
-    if not afixos:
-        problemas.append("falta a lista de afixos")
-    if problemas:
-        raise SystemExit("pacote incompleto:\n  - " + "\n  - ".join(problemas))
-
     total = sum(p.stat().st_size for p in destino.rglob("*") if p.is_file())
+
+    print(f"\n>> conferindo {nome}")
+    print(f"   {nome}.exe{' ' * max(1, 24 - len(nome))}{exe.stat().st_size / 1024 / 1024:6.1f} MB")
+    print(f"   marcador de edição       {len(marcador)}")
+    print(f"   modelos .onnx            {len(onnx)}")
+    print(f"   lista de afixos          {len(afixos)}")
     print(f"   tamanho total            {total / 1024 / 1024:6.0f} MB")
 
+    problemas = []
+    if not marcador:
+        problemas.append(f"falta o {edicao.ARQUIVO} - o exe nao saberia a edicao")
+    else:
+        lido = marcador[0].read_text(encoding="utf-8").strip()
+        if lido != qual:
+            problemas.append(f"o marcador diz {lido!r} e deveria dizer {qual!r}")
+    if qual == edicao.AUTOSKILL:
+        # O contrario das outras: aqui a presenca e' que seria defeito.
+        if onnx:
+            problemas.append(f"{len(onnx)} modelo(s) .onnx numa edição sem OCR")
+    else:
+        if len(onnx) < 3:
+            problemas.append("faltam modelos .onnx (detecção/reconhecimento/classificação)")
+        if not yaml:
+            problemas.append("falta o config.yaml do RapidOCR")
+        if not afixos:
+            problemas.append("falta a lista de afixos")
+    if problemas:
+        raise SystemExit("pacote incompleto:\n  - " + "\n  - ".join(problemas))
+    return total / 1024 / 1024
 
-def main() -> int:
-    print(f"d4forge — gerando executável com {PY}")
+
+def main(argv: list[str] | None = None) -> int:
+    pedidas = [a.lower() for a in (argv if argv is not None else sys.argv[1:])]
+    for a in pedidas:
+        if a not in EDICOES:
+            raise SystemExit(
+                f"edição desconhecida: {a!r}. Escolha entre {', '.join(EDICOES)}."
+            )
+    alvos = pedidas or list(EDICOES)
+
+    print(f"d4forge — gerando {len(alvos)} executável(is) com {PY}")
     garantir_dependencias()
     icone = garantir_icone()
 
-    # O `finally` nao e' zelo excessivo: `limpar()` ABORTA quando o .exe esta'
-    # aberto, e sem isto a configuracao do usuario ficaria largada no temporario.
-    guardado = guardar_dados()
-    try:
-        limpar()
-        empacotar(icone)
-    finally:
-        devolver_dados(guardado)
+    tamanhos: dict[str, float] = {}
+    for qual in alvos:
+        nome, _ = EDICOES[qual]
+        # O `finally` nao e' zelo excessivo: `limpar()` ABORTA quando o .exe
+        # esta' aberto, e sem isto a configuracao do usuario ficaria largada
+        # no temporario.
+        guardado = guardar_dados(nome=nome)
+        try:
+            limpar(nome)
+            empacotar(qual, icone)
+        finally:
+            devolver_dados(guardado, nome=nome)
+            # O marcador nao pode sobrar na arvore: rodar do codigo-fonte
+            # depois de compilar a edicao `autoskill` mostraria uma aba so'.
+            MARCADOR.unlink(missing_ok=True)
+        tamanhos[qual] = conferir(qual)
 
-    destino = ROOT / "dist" / NOME
-    conferir(destino)
-
-    print(f"\nPronto: {destino / (NOME + '.exe')}")
-    print("A pasta dist/d4forge/ inteira é o aplicativo — copie ela, não só o .exe.")
+    print("\nPronto:")
+    for qual in alvos:
+        nome, _ = EDICOES[qual]
+        print(f"  {qual:10} dist/{nome}/{nome}.exe   {tamanhos[qual]:5.0f} MB")
+    print("A pasta de cada um é o aplicativo — copie ela, não só o .exe.")
     return 0
 
 

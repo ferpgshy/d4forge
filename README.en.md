@@ -17,8 +17,23 @@ Watch a quick walkthrough of the workflow in [Demo.mp4](Demo.mp4).
 
 ## Install
 
-Download the `.zip` from the [latest release](../../releases/latest), extract it
-and run `d4forge.exe`. No Python needed.
+Download **`d4forge-launcher.exe`** from the
+[latest release](../../releases/latest) and run it. It is 10 MB: it shows the
+three editions, downloads the one you pick and tells you when a new version is
+out. No Python needed.
+
+| edition | what it has | download |
+|---|---|---|
+| **Complete** | Enchant, Tempering, Masterworking, AutoSkill and Catalog | 134 MB |
+| **Forge** | crafting benches only | same package as Complete |
+| **AutoSkill** | AutoSkill only, no text reader | 96 MB |
+
+Forge and Complete come from the **same download**: the two packages differ by
+a ten-byte marker, so switching between them is instant and downloads nothing.
+
+The launcher installs into a folder next to itself — copy the whole folder to
+move it to another machine. Your `data/` (binds, target, edited catalog) is
+preserved across updates.
 
 <details>
 <summary>Running from source</summary>
@@ -37,6 +52,16 @@ To build the executable and the shortcut:
 .venv\Scripts\python.exe tools\build_exe.py
 .venv\Scripts\python.exe tools\criar_atalho.py
 ```
+
+To assemble a whole release — both editions, the launcher and the
+`manifesto.json` it reads:
+
+```powershell
+.venv\Scripts\python.exe tools\empacotar_release.py
+```
+
+To check the launcher against a release **before** publishing it, serve the
+`dist/release` folder over HTTP and point `D4FORGE_ORIGEM` at it.
 
 </details>
 

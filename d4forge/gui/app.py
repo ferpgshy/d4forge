@@ -45,7 +45,7 @@ from ..profile import DEFAULT_PROFILE
 from ..profiling import Profiler
 from ..rules import Comparison, RuleSet, TargetRule
 from ..vision.ocr import OcrEngine
-from . import style
+from . import roda, style
 from .frameless import (
     FramelessMixin,
     TitleBarArea,
@@ -226,6 +226,10 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._target_timer.timeout.connect(lambda: self._save_target())
         self._unknown: dict[str, int] = {}
         self._catalog_carregado = False
+        # A roda do mouse rola a página e não altera campo nenhum — ver
+        # `roda.py`. Ligado aqui, e não em `main()`, para valer também quando
+        # a janela é criada direto (atalho, teste, outra entrada).
+        self._filtro_de_roda = roda.proteger(QApplication.instance())
 
         # O titulo carrega a edicao: com tres executaveis parecidos abertos,
         # e' o que diz qual e' qual na barra de tarefas.
